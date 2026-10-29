@@ -127,4 +127,48 @@ class Preferences {
     return prefs!.getString(refLink);
   }
 
+  static const String acceptedOrderIdsKey = 'accepted_order_ids';
+
+  static List<String> getAcceptedOrderIds() {
+    return prefs?.getStringList(acceptedOrderIdsKey) ?? [];
+  }
+
+  static void addAcceptedOrderId(String? id) {
+    if (id == null) return;
+    final cleanId = id.trim();
+    if (cleanId.isEmpty) return;
+    final current = getAcceptedOrderIds().toSet();
+    current.add(cleanId);
+    prefs?.setStringList(acceptedOrderIdsKey, current.toList());
+  }
+
+  static bool isOrderAcceptedLocally(String? id) {
+    if (id == null) return false;
+    final cleanId = id.trim();
+    if (cleanId.isEmpty) return false;
+    return getAcceptedOrderIds().contains(cleanId);
+  }
+
+  static const String startedOrderIdsKey = 'started_order_ids';
+
+  static List<String> getStartedOrderIds() {
+    return prefs?.getStringList(startedOrderIdsKey) ?? [];
+  }
+
+  static void addStartedOrderId(String? id) {
+    if (id == null) return;
+    final cleanId = id.trim();
+    if (cleanId.isEmpty) return;
+    final current = getStartedOrderIds().toSet();
+    current.add(cleanId);
+    prefs?.setStringList(startedOrderIdsKey, current.toList());
+  }
+
+  static bool isOrderStartedLocally(String? id) {
+    if (id == null) return false;
+    final cleanId = id.trim();
+    if (cleanId.isEmpty) return false;
+    return getStartedOrderIds().contains(cleanId);
+  }
 }
+

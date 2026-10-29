@@ -42,6 +42,10 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
     if (userDataValue != null) {
       try {
         userData = json.decode(userDataValue);
+        final savedRef = (userData["referral_code"] ?? "").toString().trim();
+        if (savedRef.isNotEmpty && _referralController.text.isEmpty) {
+          _referralController.text = savedRef;
+        }
       } catch (e) {
         print("Error decoding userData: $e");
       }
@@ -63,6 +67,105 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
       }
     } catch (e) {
       print("Error fetching registration fee: $e");
+    }
+  }
+
+  Future<void> _applyReferralCode() async {
+    final code = _referralController.text.trim();
+    if (code.isEmpty) {
+      UtilClass.showAlertDialog(
+        context: context,
+        message: "Please enter a referral code",
+      );
+      return;
+    }
+
+    final hasInternet = await UtilClass.checkInternet();
+    if (!hasInternet) {
+      if (mounted) {
+        UtilClass.showAlertDialog(context: context, message: Config.kNoInternet);
+      }
+      return;
+    }
+
+    if (mounted) {
+      UtilClass.showProgress(context: context);
+    }
+
+    try {
+      final response = await Repository.postApiService(
+        EndPoints.getReferralDetails,
+        {"referral_id": code},
+      );
+      UtilClass.hideProgress();
+
+      dynamic parsed = response is String ? json.decode(response) : response;
+      if (parsed != null &&
+          (parsed["status"] == "valid" ||
+              parsed["status"] == true ||
+              parsed["status"] == "success")) {
+        // Prevent self-referral
+        if (parsed["referraldetails"] != null && parsed["referraldetails"] is Map) {
+          final refMap = parsed["referraldetails"] as Map;
+          final refUserId = refMap["id"]?.toString() ?? "";
+          final currentUserId = (userData["user_id"] ?? userData["id"] ?? "").toString();
+          final currentRefId = (userData["referral_id"] ?? "").toString();
+
+          if ((refUserId.isNotEmpty && refUserId == currentUserId) ||
+              (currentRefId.isNotEmpty && currentRefId.toUpperCase() == code.toUpperCase())) {
+            if (mounted) {
+              UtilClass.showAlertDialog(
+                context: context,
+                message: "You cannot use your own referral code.",
+              );
+            }
+            return;
+          }
+
+          final dynSaving = double.tryParse(refMap["saving_amount"]?.toString() ??
+              refMap["amount"]?.toString() ?? "");
+          if (dynSaving != null && dynSaving > 0) {
+            referralSaving = dynSaving;
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            isReferralApplied = true;
+          });
+
+          showDialog(
+            context: context,
+            builder: (dialogContext) {
+              Future.delayed(const Duration(seconds: 2), () {
+                if (Navigator.of(dialogContext).canPop()) {
+                  Navigator.of(dialogContext).pop();
+                }
+              });
+              return ReferralDialog(
+                title: "Offer code applied",
+                subtitle: "₹ ${referralSaving.toStringAsFixed(0)} savings with this code",
+                image: "assets/images/couponCode.png",
+              );
+            },
+          );
+        }
+      } else {
+        if (mounted) {
+          final msg = (parsed != null && parsed["message"] != null)
+              ? parsed["message"].toString()
+              : "Invalid referral code. Please enter a valid code.";
+          UtilClass.showAlertDialog(context: context, message: msg);
+        }
+      }
+    } catch (e) {
+      UtilClass.hideProgress();
+      if (mounted) {
+        UtilClass.showAlertDialog(
+          context: context,
+          message: "Failed to validate referral code. Please try again.",
+        );
+      }
     }
   }
 
@@ -106,35 +209,17 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
       _razorpay.open(options);
     } catch (e) {
       debugPrint("Razorpay open error: $e");
-      if (Config.razorpayKey.startsWith("rzp_test_")) {
-        _showTestPaymentFallback(
-          reason: "Unable to open Razorpay gateway: $e",
-          onSimulateSuccess: () {
-            callpaymentVeifyAPI("PAY_TEST_${DateTime.now().millisecondsSinceEpoch}");
-          },
-        );
-      } else {
-        showAlertDialog(context, "Payment Error", "Unable to open payment screen: $e");
-      }
+      showAlertDialog(context, "Payment Error", "Unable to open payment screen: $e");
     }
   }
 
   void handlePaymentErrorResponse(PaymentFailureResponse response) {
     debugPrint("Razorpay failure: code ${response.code}, msg: ${response.message}");
-    if (Config.razorpayKey.startsWith("rzp_test_")) {
-      _showTestPaymentFallback(
-        reason: "${response.message ?? 'Payment was cancelled or failed'}",
-        onSimulateSuccess: () {
-          callpaymentVeifyAPI("PAY_TEST_${DateTime.now().millisecondsSinceEpoch}");
-        },
-      );
-    } else {
-      showAlertDialog(
-        context,
-        "Payment Failed",
-        "${response.message ?? 'Payment failed. Please try again.'}",
-      );
-    }
+    showAlertDialog(
+      context,
+      "Payment Failed",
+      "${response.message ?? 'Payment failed. Please try again.'}",
+    );
   }
 
   void handlePaymentSuccessResponse(PaymentSuccessResponse response) {
@@ -146,46 +231,6 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
       context,
       "External Wallet Selected",
       "${response.walletName}",
-    );
-  }
-
-  void _showTestPaymentFallback({
-    required String reason,
-    required VoidCallback onSimulateSuccess,
-  }) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: const [
-            Icon(Icons.payment, color: Colors.orange),
-            SizedBox(width: 8),
-            Text("Payment (Test Mode)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
-        ),
-        content: Text(
-          "$reason\n\nYou are in Test Mode (using test key). Would you like to simulate successful payment to complete registration testing?",
-          style: const TextStyle(fontSize: 14, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D32),
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () {
-              Navigator.pop(ctx);
-              onSimulateSuccess();
-            },
-            child: const Text("Simulate Success"),
-          ),
-        ],
-      ),
     );
   }
 
@@ -231,6 +276,7 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
               final userMap = Map<String, dynamic>.from(userData);
               userMap['registration_fee'] = '1';
               userMap['registration_fee_status'] = '1';
+              userMap['status'] = '1';
               Preferences.setUserDetails(json.encode(userMap));
             } catch (_) {}
 
@@ -240,14 +286,14 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
               builder: (dialogCtx) {
                 Future.delayed(const Duration(seconds: 2), () {
                   Navigator.of(context).pushNamedAndRemoveUntil(
-                    Config.subSuccessRouteName,
+                    Config.regiSuccessRouteName,
                     (route) => false,
                   );
                 });
 
                 return const ReferralDialog(
                   title: "Payment Successful",
-                  subtitle: "Thank You for registering. Redirecting to Login...",
+                  subtitle: "Thank you for completing your registration fee payment.",
                   image: "assets/images/greentick.png",
                 );
               },
@@ -279,39 +325,82 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
     }
   }
 
+  Future<void> _handleExit(BuildContext context) async {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+      return;
+    }
+
+    final bool? shouldExit = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("Exit Payment"),
+        content: const Text(
+          "One-time registration fee payment is required to activate your provider account.\n\nYou can complete the payment at any time from your Account Setup Status.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("Stay"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4CAF50)),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text("Back to Status", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldExit == true && context.mounted) {
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        Config.onboardingStatusRouteName,
+        (route) => false,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final deviceHeight = MediaQuery.of(context).size.height;
     final deviceWidth = MediaQuery.of(context).size.width;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF4CAF50),
-      body: SafeArea(
-        child: Container(
-          width: deviceWidth,
-          height: deviceHeight,
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF66BB6A), Color(0xFF4CAF50), Color(0xFF388E3C)],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          _handleExit(context);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF4CAF50),
+        body: SafeArea(
+          child: Container(
+            width: deviceWidth,
+            height: deviceHeight,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF66BB6A), Color(0xFF4CAF50), Color(0xFF388E3C)],
+              ),
             ),
-          ),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: deviceWidth * 0.08),
-              child: Column(
-                children: [
-                  // Close button
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                        top: 10,
-                        right: deviceWidth * 0.02,
-                      ),
-                      child: GestureDetector(
-                        onTap: () => Navigator.maybePop(context),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: deviceWidth * 0.08),
+                child: Column(
+                  children: [
+                    // Close button
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          top: 10,
+                          right: deviceWidth * 0.02,
+                        ),
+                        child: GestureDetector(
+                          onTap: () => _handleExit(context),
                         child: Container(
                           width: 36,
                           height: 36,
@@ -524,45 +613,29 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
                         child: ElevatedButton(
                           onPressed: () {
                             FocusScope.of(context).unfocus();
-                            if (_referralController.text.trim().isNotEmpty) {
+                            if (isReferralApplied) {
                               setState(() {
-                                isReferralApplied = true;
+                                isReferralApplied = false;
+                                _referralController.clear();
                               });
-                              showDialog(
-                                context: context,
-                                builder: (dialogContext) {
-                                  Future.delayed(const Duration(seconds: 2), () {
-                                    if (Navigator.of(dialogContext).canPop()) {
-                                      Navigator.of(dialogContext).pop();
-                                    }
-                                  });
-                                  return ReferralDialog(
-                                    title: "Offer code applied",
-                                    subtitle: "₹ ${referralSaving.toStringAsFixed(0)} savings with this code",
-                                    image: "assets/images/couponCode.png",
-                                  );
-                                },
-                              );
                             } else {
-                              UtilClass.showAlertDialog(
-                                context: context,
-                                message: "Please enter a referral code",
-                              );
+                              _applyReferralCode();
                             }
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.white,
-                            foregroundColor: const Color(0xFF4CAF50),
+                            foregroundColor: isReferralApplied ? Colors.red : const Color(0xFF4CAF50),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(25),
                             ),
                             padding: const EdgeInsets.symmetric(horizontal: 20),
                           ),
-                          child: const Text(
-                            'Apply',
+                          child: Text(
+                            isReferralApplied ? 'Remove' : 'Apply',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
+                              color: isReferralApplied ? Colors.red : const Color(0xFF4CAF50),
                             ),
                           ),
                         ),
@@ -605,27 +678,6 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
                     ),
                   ),
 
-                  if (Config.razorpayKey.startsWith("rzp_test_")) ...[
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      height: 38,
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.check_circle_outline, size: 16, color: Colors.white),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: const BorderSide(color: Colors.white70),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                        ),
-                        onPressed: () {
-                          callpaymentVeifyAPI("PAY_TEST_${DateTime.now().millisecondsSinceEpoch}");
-                        },
-                        label: const Text(
-                          "Complete with Test Key (Simulate)",
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ),
-                  ],
 
                   SizedBox(height: deviceHeight * 0.04),
                 ],
@@ -634,7 +686,8 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 }
 

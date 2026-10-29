@@ -48,6 +48,22 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     ],
   };
 
+  String get resolvedOrderId =>
+      (widget.order["job_calender_id"] ?? widget.order["id"] ?? widget.order["order_id"] ?? "").toString();
+
+  double get travelingTotal {
+    double fee = _parseDouble(orderDetails["travelling_charges"] ??
+        orderDetails["travelingCharge"] ??
+        orderDetails["traveling_charge"] ??
+        0);
+    if (fee == 0) {
+      for (var item in servicesData) {
+        fee += _parseDouble(item["travelingCharge"] ?? item["travelling_charges"]);
+      }
+    }
+    return fee;
+  }
+
   GetCancelOrderReasons? cancelReasonsData;
 
   // ------------------ IMAGE PICKER ------------------
@@ -181,11 +197,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     final List<dynamic> amounts = _extraCharges
         .map((city) => city["amount"])
         .toList();
-    final resolvedOrderId = widget.order["job_calender_id"] ?? widget.order["id"] ?? widget.order["order_id"];
     var finalData = {
       "job_calender_id": resolvedOrderId,
       "payment_type": _selectedPaymentIndex == 0 ? "phonepay" : "cash",
-      "travelling_charges": "50",
+      "travelling_charges": travelingTotal > 0 ? travelingTotal.toStringAsFixed(0) : "0",
       "add_extra_charges": amounts,
       "reason_for_extracharges": labels,
     };
@@ -264,17 +279,18 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
         dynamic parsed = value;
         try {
-          if (parsed["status"] == "success") {
-            Navigator.pushNamed(
+          if (parsed["status"] == "success" || parsed["status"] == "valid") {
+            Navigator.pushNamedAndRemoveUntil(
               // ignore: use_build_context_synchronously
               context,
               Config.myOrdersRouteName,
+              (route) => false,
             );
-            Future.delayed(const Duration(seconds: 1), () {
+            Future.delayed(const Duration(milliseconds: 500), () {
               UtilClass.showAlertDialog(
                 // ignore: use_build_context_synchronously
                 context: context,
-                message: parsed["message"],
+                message: parsed["message"] ?? "Job completed successfully!",
               );
             });
           } else {
@@ -292,6 +308,29 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     } else {
       // ignore: use_build_context_synchronously
       UtilClass.showAlertDialog(context: context, message: Config.kNoInternet);
+    }
+  }
+
+  void _syncChargesToBackend() async {
+    final List<dynamic> labels = _extraCharges
+        .map((city) => city["description"])
+        .toList();
+    final List<dynamic> amounts = _extraCharges
+        .map((city) => city["amount"])
+        .toList();
+    var syncData = {
+      "job_calender_id": resolvedOrderId,
+      "travelling_charges": travelingTotal > 0 ? travelingTotal.toStringAsFixed(0) : "0",
+      "add_extra_charges": amounts,
+      "reason_for_extracharges": labels,
+    };
+    try {
+      await Repository.postApiServiceWithJson(
+        EndPoints.updateCharges,
+        syncData,
+      );
+    } catch (e) {
+      debugPrint("Error syncing extra charges: $e");
     }
   }
 
@@ -350,6 +389,15 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               }
             }
 
+            final loadedExtra = (data["extra_charges"] is List) ? List<dynamic>.from(data["extra_charges"]) : [];
+            if (loadedExtra.isNotEmpty && _extraCharges.isEmpty) {
+              _extraCharges = loadedExtra.map((c) => {
+                'amount': _parseDouble(c["extra_charge_amount"] ?? c["amount"]),
+                'description': (c["reason"] ?? c["description"] ?? "Extra Charge").toString(),
+              }).toList();
+              _extraServiceTotal = _extraCharges.fold(0.0, (sum, item) => sum + _parseDouble(item['amount']));
+            }
+
             setState(() {
               orderDetails = data;
               servicesData = services;
@@ -384,6 +432,13 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   void callVerifyAPI(code) async {
+    if (!_isOrderAccepted()) {
+      UtilClass.showAlertDialog(
+        context: context,
+        message: "Please accept the order first before verifying customer code.",
+      );
+      return;
+    }
     final codeStr = code?.toString().trim() ?? "";
     if (codeStr.isEmpty) {
       UtilClass.showAlertDialog(
@@ -501,16 +556,24 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     ///
 
     double servicesTotal = 0;
+    double discountTotal = 0;
     for (var item in servicesData) {
-      servicesTotal += _parseDouble(item["price"]);
+      final q = item["quantity"] ?? item["qty"] ?? orderDetails["quantity"] ?? widget.order["quantity"] ?? 1;
+      final qInt = int.tryParse(q.toString()) ?? 1;
+      final qty = qInt > 0 ? qInt : 1;
+      servicesTotal += _parseDouble(item["price"]) * qty;
+      discountTotal += _parseDouble(item["discount"]);
+    }
+    if (discountTotal <= 0) {
+      discountTotal = _parseDouble(orderDetails["discount"] ??
+          orderDetails["coupon_amount"] ??
+          widget.order["discount"] ??
+          widget.order["coupon_amount"] ??
+          "0");
     }
 
-    // double travelingTotal = 0;
-    // for (var item in servicesData) {
-    //   travelingTotal += _parseDouble(item["travelingCharge"]);
-    // }
-
-    final totalAmount = servicesTotal + _extraServiceTotal;
+    final netServicesTotal = (servicesTotal - discountTotal).clamp(0.0, double.infinity);
+    final totalAmount = netServicesTotal + _extraServiceTotal + travelingTotal;
     //ser end
 
     return Scaffold(
@@ -636,7 +699,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                           );
                           return;
                         }
-                        submitOrdersPI();
+                        _showPaymentConfirmationDialog(context, totalAmount);
                       },
                       child: Text(
                         'Submit Details',
@@ -653,6 +716,121 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               ),
             )
           : Container(),
+    );
+  }
+
+  void _showPaymentConfirmationDialog(BuildContext context, double totalAmount) {
+    final paymentMethodName = _selectedPaymentIndex == 0 ? "Payment via PhonePe (UPI)" : "By hand cash";
+    final paymentIcon = _selectedPaymentIndex == 0 ? Icons.qr_code_2 : Icons.payments_outlined;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(paymentIcon, size: 40, color: Colors.green.shade700),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  "Confirm Payment Collection",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text("Payment Mode:", style: TextStyle(color: Colors.black54, fontSize: 13)),
+                          Text(paymentMethodName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        ],
+                      ),
+                      const Divider(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text("Total to Collect:", style: TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.w600)),
+                          Text(
+                            "₹${totalAmount.toStringAsFixed(0)}",
+                            style: const TextStyle(
+                              color: Colors.green,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  "Have you collected ₹${totalAmount.toStringAsFixed(0)} from the customer?\nOnce completed, this order is permanently finalized.",
+                  style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          side: BorderSide(color: Colors.grey.shade400),
+                        ),
+                        onPressed: () => Navigator.pop(dialogCtx),
+                        child: const Text("Cancel / Review", style: TextStyle(color: Colors.black87)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          backgroundColor: Colors.green.shade600,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(dialogCtx);
+                          submitOrdersPI();
+                        },
+                        child: const Text(
+                          "Yes, Confirm",
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -932,6 +1110,13 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                Text(
+                  "Quantity: ${orderDetails["quantity"] ?? widget.order["quantity"] ?? 1}",
+                  style: const TextStyle(
+                    color: Color(0xFF2E7D32),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 SizedBox(height: size.height * 0.005),
 
                 Row(
@@ -998,6 +1183,33 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   /// Order Code Section with Verify Button Logic
   Widget _buildOrderCodeSection(Size size) {
+    if (!_isOrderAccepted()) {
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.amber.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.amber.shade400),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.lock_outline, color: Colors.amber.shade900, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                "Please accept this order first to enter customer verification code.",
+                style: TextStyle(
+                  color: Colors.amber.shade900,
+                  fontSize: size.width * 0.033,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1056,8 +1268,55 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     return status == "scheduled" || status == "open" || status == "pending" || status == "in_progress" || status == "started" || status == "assigned";
   }
 
+  bool _isOrderAccepted() {
+    final status = (orderDetails["order_status"] ??
+            widget.order["order_status"] ??
+            widget.order["status"] ??
+            "")
+        .toString()
+        .toLowerCase()
+        .trim();
+    if (status == "open") return false;
+    final ordId = (orderDetails["id"] ?? widget.order["id"] ?? "").toString().trim();
+    final calId = (orderDetails["job_calender_id"] ?? widget.order["job_calender_id"] ?? "").toString().trim();
+    final txnId = (orderDetails["order_txn"] ?? widget.order["order_txn"] ?? "").toString().trim();
+    if (Preferences.isOrderAcceptedLocally(ordId) ||
+        Preferences.isOrderAcceptedLocally(calId) ||
+        Preferences.isOrderAcceptedLocally(txnId) ||
+        Preferences.isOrderStartedLocally(ordId) ||
+        Preferences.isOrderStartedLocally(calId) ||
+        Preferences.isOrderStartedLocally(txnId)) {
+      return true;
+    }
+    return status == "pending" ||
+        status == "accepted" ||
+        status == "started" ||
+        status == "in_progress" ||
+        status == "ongoing" ||
+        status == "completed";
+  }
+
   String _getOrderTotalDisplay() {
-    for (final key in ["total_amount", "grand_total", "order_amount", "price", "sub_total"]) {
+    double servicesTotal = 0;
+    for (var item in servicesData) {
+      final q = item["quantity"] ?? item["qty"] ?? orderDetails["quantity"] ?? widget.order["quantity"] ?? 1;
+      final qInt = int.tryParse(q.toString()) ?? 1;
+      final qty = qInt > 0 ? qInt : 1;
+      servicesTotal += _parseDouble(item["price"]) * qty;
+    }
+    final liveTotal = servicesTotal + _extraServiceTotal + travelingTotal;
+    if (liveTotal > 0) {
+      return "₹${liveTotal.toStringAsFixed(0)}";
+    }
+    for (final key in [
+      "total_order_amount",
+      "grand_total",
+      "sub_total",
+      "price",
+      "doorstep_amount",
+      "total_amount",
+      "order_amount",
+    ]) {
       final val = orderDetails[key] ?? widget.order[key];
       if (val != null && val.toString().trim().isNotEmpty && val.toString().trim() != "0") {
         return "₹${val.toString().trim()}";
@@ -1198,20 +1457,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   }
 
   bool _isPaymentCompleted() {
+    final orderStatus = (orderDetails["order_status"] ?? widget.order["order_status"] ?? widget.order["status"] ?? "").toString().toLowerCase().trim();
+    if (orderStatus == "completed" || orderStatus == "2") return true;
+
     final status = (orderDetails["payment_status"] ?? widget.order["payment_status"] ?? "").toString().toLowerCase().trim();
     if (status == "paid" || status == "completed" || status == "success" || status == "1" || status == "true") return true;
 
-    final paymentId = (orderDetails["payment_id"] ?? widget.order["payment_id"] ?? "").toString().trim();
-    if (paymentId.isNotEmpty && paymentId != "0" && paymentId != "null" && paymentId != "undefined") {
-      return true;
-    }
-
-    final type = (orderDetails["payment_type"] ?? widget.order["payment_type"] ?? "").toString().toLowerCase().trim();
-    if (type.isNotEmpty && type != "cash" && type != "pay after service" && type != "cod") {
-      if (status != "failed" && status != "pending" && status != "0") {
-        return true;
-      }
-    }
+    // Note: payment_id from booking checkout is for the GoBuddy Platform Fee,
+    // not for doorstep service payment. Service payment is collected upon job completion.
     return false;
   }
 
@@ -1219,13 +1472,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     final isPaid = _isPaymentCompleted();
     final type = (orderDetails["payment_type"] ?? widget.order["payment_type"] ?? "").toString().toLowerCase().trim();
     if (isPaid) {
-      final mode = type.isNotEmpty && type != "cash" ? type.toUpperCase() : 'ONLINE PAID';
+      final mode = type.isNotEmpty && type != "cash" ? type.toUpperCase() : (type == "cash" ? "CASH" : "PAID");
       return "Payment Completed ($mode)";
     }
-    if (type.isNotEmpty && type != "cash") {
-      return "Payment Method: ${type.toUpperCase()}";
-    }
-    return "Pay after service";
+    return "Payment Pending (Collect after service)";
   }
 
   /// Customer Details
@@ -1343,7 +1593,33 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             ),
 
             SizedBox(height: size.height * 0.01),
-            if (!_isVerified)
+            if (!_isOrderAccepted())
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber.shade400),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.lock_outline, color: Colors.amber.shade900, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Please accept this order first to enter customer verification code.",
+                        style: TextStyle(
+                          color: Colors.amber.shade900,
+                          fontSize: size.width * 0.033,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else if (!_isVerified)
               Row(
                 children: [
                   Expanded(
@@ -1687,20 +1963,58 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           // Each service price
           Column(
             children: servicesData.map((service) {
-              double price =
-                  (double.tryParse(service["price"]?.toString() ?? "0") ?? 0.0) +
-                      (double.tryParse(service["discount"]?.toString() ?? "0") ?? 0.0);
-              return _priceRow(service["service_name"], price);
+              double price = _parseDouble(service["price"]);
+              final q = service["quantity"] ?? service["qty"] ?? orderDetails["quantity"] ?? widget.order["quantity"] ?? 1;
+              final qInt = int.tryParse(q.toString()) ?? 1;
+              final qty = qInt > 0 ? qInt : 1;
+              final sName = qty > 1
+                  ? "${service["service_name"] ?? "Service"} (x$qty)"
+                  : (service["service_name"] ?? "Service");
+              final linePrice = price * qty;
+              return _priceRow(sName, linePrice);
             }).toList(),
           ),
 
           // Display extra service charges
           if (_extraCharges.isNotEmpty)
             Column(
-              children: _extraCharges.map((charge) {
-                return _priceRow(
-                  charge['description'] ?? 'Extra Service',
-                  _parseDouble(charge['amount']),
+              children: _extraCharges.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final charge = entry.value;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        charge['description'] ?? 'Extra Service',
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            "₹${_parseDouble(charge['amount']).toStringAsFixed(0)}",
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                          if (_canPerformServiceActions()) ...[
+                            const SizedBox(width: 6),
+                            InkWell(
+                              onTap: () {
+                                setState(() {
+                                  final removed = _extraCharges.removeAt(idx);
+                                  _extraServiceTotal -= _parseDouble(removed['amount']);
+                                  if (_extraServiceTotal < 0) _extraServiceTotal = 0.0;
+                                });
+                                _syncChargesToBackend();
+                              },
+                              child: const Icon(Icons.close, size: 16, color: Colors.red),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
                 );
               }).toList(),
             ),
@@ -1708,27 +2022,35 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           _priceRow("Extra Service charge", null, isAdd: true),
 
           _priceRow('Discount', sum),
-          // _priceRow("Traveling Charge", _parseDouble(orderData["travelingCharge"])),
+          if (travelingTotal > 0)
+            _priceRow("Traveling Charge", travelingTotal),
           const Divider(),
-          _priceRow("Total Amount", totalAmount, isBold: true),
+          _priceRow(
+            _isPaymentCompleted() || !_canPerformServiceActions()
+                ? "Amount Collected"
+                : "Amount to Collect",
+            totalAmount,
+            isBold: true,
+          ),
           SizedBox(height: size.height * 0.02),
           // Only show cash/PhonePe payment collection options if order is NOT already paid
           Visibility(
-            visible: !_isPaymentCompleted() && (orderDetails["order_status"] == "Scheduled" || orderDetails["order_status"] == "Completed" || orderDetails["order_status"] == "Open" || orderDetails["order_status"] == "Pending"),
+            visible: !_isPaymentCompleted() && _canPerformServiceActions(),
             child: Container(
               padding: EdgeInsets.all(size.width * 0.04),
               decoration: BoxDecoration(
                 color: Colors.green.shade50,
                 borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green.shade200),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    "Payment via",
+                    "Collect Payment from Customer via",
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  _paymentOption(0, "Payment via PhonePe"),
+                  _paymentOption(0, "Payment via PhonePe (UPI)"),
                   _paymentOption(1, "By hand cash"),
                 ],
               ),
@@ -1766,10 +2088,16 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               isAdd
                   ? "ADD"
                   : amount != null
-                  ? "₹${amount.toStringAsFixed(2)}"
+                  ? (title.toLowerCase().contains("discount") && amount > 0
+                      ? "-₹${amount.toStringAsFixed(2)}"
+                      : "₹${amount.toStringAsFixed(2)}")
                   : "",
               style: TextStyle(
-                color: isAdd ? Colors.green : Colors.black,
+                color: isAdd
+                    ? Colors.green
+                    : (title.toLowerCase().contains("discount") && amount != null && amount > 0
+                        ? Colors.green
+                        : Colors.black),
                 fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
               ),
             ),
@@ -1887,6 +2215,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                               });
                               _extraServiceTotal += amount;
                             });
+                            _syncChargesToBackend();
 
                             print(
                               "Extra Charge Added: ₹$amount, Desc: $description",
@@ -2052,7 +2381,23 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     fontSize: size.width * 0.043,
                   ),
                 ),
-
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F5E9),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: const Color(0xFFC8E6C9)),
+                  ),
+                  child: Text(
+                    "Quantity: ${service["quantity"] ?? service["qty"] ?? orderDetails["quantity"] ?? widget.order["quantity"] ?? 1}",
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF2E7D32),
+                    ),
+                  ),
+                ),
                 SizedBox(height: 6),
 
                 Text(

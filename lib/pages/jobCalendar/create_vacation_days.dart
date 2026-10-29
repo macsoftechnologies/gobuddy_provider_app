@@ -650,6 +650,7 @@ Future<_TimeOfDayPair?> _pickTimeRange({
             'date': dateStr,
             'start_time': formatTime(v['startTime']),
             'end_time': formatTime(v['endTime']),
+            'status': 'vacation',
           });
         }
       }

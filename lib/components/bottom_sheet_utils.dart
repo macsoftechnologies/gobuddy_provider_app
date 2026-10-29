@@ -98,10 +98,10 @@ class BottomSheetUtils {
                   return Column(
                     children: [
                       RadioListTile<String>(
-                        value: pkg["id"],
-                        groupValue: selectedPackageId,
+                        value: pkg["id"].toString(),
+                        groupValue: selectedPackageId?.toString(),
                         onChanged: (val) {
-                          setState(() => selectedPackageId = val);
+                          setState(() => selectedPackageId = val?.toString());
                         },
                         title: Text(
                           "${pkg["jobs"]} Jobs / ₹ ${pkg["amount"]}",
@@ -122,7 +122,7 @@ class BottomSheetUtils {
                       : () {
                           // Find the full package map for the selected ID
                           final selectedPkg = packages.firstWhere(
-                              (p) => p["id"] == selectedPackageId);
+                              (p) => p["id"].toString() == selectedPackageId?.toString());
 
                               selectedPkg["selectedIndex"] = selectedTab;
 

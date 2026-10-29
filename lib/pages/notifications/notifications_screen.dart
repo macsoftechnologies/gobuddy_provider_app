@@ -151,13 +151,55 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
+  bool _isActionableJobNotification(Data data) {
+    final title = (data.title ?? "").toLowerCase().trim();
+    final subtitle = (data.subtitle ?? "").toLowerCase().trim();
+
+    // Explicitly exclude non-job notifications (registration, welcome, account, profile)
+    if (title.contains("registration") ||
+        title.contains("register") ||
+        title.contains("welcome") ||
+        title.contains("profile") ||
+        title.contains("account") ||
+        subtitle.contains("registration") ||
+        subtitle.contains("welcome")) {
+      return false;
+    }
+
+    // Must be an actionable job, booking, or order
+    final hasService = data.serviceName != null && data.serviceName!.trim().isNotEmpty;
+    final isJobKeyword = title.contains("job") ||
+        title.contains("order") ||
+        title.contains("booking") ||
+        title.contains("assigned") ||
+        subtitle.contains("booked") ||
+        subtitle.contains("service");
+
+    return hasService || isJobKeyword;
+  }
+
+  String _formatAmount(String? val) {
+    if (val == null || val.trim().isEmpty) return "0";
+    final clean = val.replaceAll(",", "").trim();
+    final numVal = double.tryParse(clean);
+    if (numVal == null) return val;
+    if (numVal == numVal.roundToDouble()) {
+      return numVal.toInt().toString();
+    }
+    return numVal.toStringAsFixed(2);
+  }
+
   Widget _notificationCard(Data data) {
-    final bool isNew = data.status == "new";
+    final bool isActionableJob = _isActionableJobNotification(data);
+    final String notifId = data.id?.toString().trim() ?? "";
+    final bool isLocallyAccepted = notifId.isNotEmpty && Preferences.isOrderAcceptedLocally(notifId);
+    final bool isAccepted = data.status == "accepted" || isLocallyAccepted;
     final bool isCancelled = data.status == "cancelled";
-    final bool isAccepted = data.status == "accepted";
+    final bool isNew = data.status == "new" && !isAccepted && !isCancelled;
 
     final rawAmount = data.amount?.trim() ?? "";
-    final bool hasAmount = rawAmount.isNotEmpty &&
+    final bool hasAmount = isActionableJob &&
+        rawAmount.isNotEmpty &&
         rawAmount != "0" &&
         rawAmount != "0.0" &&
         rawAmount != "0.00" &&
@@ -243,11 +285,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             ),
           ],
 
-          // Amount (Only displayed for paid orders / when amount > 0)
+          // Amount (Only displayed for actual service orders / when amount > 0)
           if (hasAmount) ...[
             const SizedBox(height: 6),
             Text(
-              "₹ ${data.amount}",
+              "₹ ${_formatAmount(data.amount)}",
               style: const TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.bold,
@@ -279,15 +321,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             ),
           ],
 
-          // Action buttons & Status Chips (for orders)
-          if (isNew || isCancelled || isAccepted) ...[
+          // Action buttons & Status Chips (ONLY for actionable job notifications)
+          if (isActionableJob && (isNew || isCancelled || isAccepted)) ...[
             const SizedBox(height: 14),
             Row(
               children: [
                 if (isNew) ...[
                   _outlineButton("Cancel", Colors.grey, () {
-                    DashboardTabScreen.markOrderHandled(data.id?.toString());
+                    final ordId = data.id?.toString().trim() ?? "";
+                    if (ordId.isNotEmpty) {
+                      DashboardTabScreen.markOrderHandled(ordId);
+                    }
                     UtilClass.showAlertDialog(context: context, message: "Order declined.");
+                    _getNotifications();
                   }),
                   const SizedBox(width: 10),
                   _filledButton("Accept", () => _acceptOrder(data)),
@@ -363,6 +409,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
       if (parsed != null && (parsed["status"] == "valid" || parsed["status"] == true || parsed["status"] == "success")) {
         DashboardTabScreen.markOrderHandled(orderId);
+        Preferences.addAcceptedOrderId(orderId);
         UtilClass.showAlertDialog(
           context: context,
           message: parsed["message"] ?? "Order accepted successfully!",

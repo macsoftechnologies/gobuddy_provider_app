@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svprogresshud/flutter_svprogresshud.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:gobuddy/data/preferences.dart';
 import 'package:gobuddy/services/end_points.dart';
 import 'package:gobuddy/services/repository.dart';
@@ -501,6 +502,11 @@ class UtilClass {
       trimmed = trimmed.replaceAll("admin.gobuddyindia.com", "dev.gobuddyindia.com");
     }
 
+    // Force https for gobuddyindia domains to avoid cleartext issues and mixed content
+    if (trimmed.startsWith("http://") && trimmed.contains("gobuddyindia.com")) {
+      trimmed = "https://${trimmed.substring(7)}";
+    }
+
     // Handle full URLs
     if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
       final schemeEnd = trimmed.indexOf("://") + 3;
@@ -520,5 +526,122 @@ class UtilClass {
 
     return Uri.encodeFull("${base}assets/images/$trimmed");
   }
-}
+  /// Checks if location services (GPS) are enabled and permissions are granted.
+  /// If location is off, prompts user with a dialog to turn it on (opening location settings).
+  /// If permission is denied, prompts for permission (or app settings if permanently denied).
+  /// Returns the current Position if successfully obtained, or null.
+  static Future<Position?> checkAndRequestLocation(
+    BuildContext context, {
+    String message = "Your device location / GPS is turned off. Please turn on location services so GoBuddy Provider can detect your location.",
+  }) async {
+    // Step 1 (App Permission): Check Geolocator.checkPermission()
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Location permission is required to detect your location."),
+            ),
+          );
+        }
+        return null;
+      }
+    }
 
+    if (permission == LocationPermission.deniedForever) {
+      if (!context.mounted) return null;
+      final bool? openSettings = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            "Permission Required",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          content: const Text(
+            "Location permissions are permanently denied. Please enable location permissions in App Settings.",
+            style: TextStyle(fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4CAF50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text("Settings", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+      if (openSettings == true) {
+        await Geolocator.openAppSettings();
+      }
+      return null;
+    }
+
+    // Step 2 (Device GPS Service): Check Geolocator.isLocationServiceEnabled()
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (!context.mounted) return null;
+      final bool? shouldOpen = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: const [
+              Icon(Icons.location_off, color: Colors.orange, size: 28),
+              SizedBox(width: 10),
+              Text(
+                "Enable Location",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          content: Text(
+            message,
+            style: const TextStyle(fontSize: 14, color: Colors.black87),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4CAF50),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text("Turn On", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldOpen == true) {
+        await Geolocator.openLocationSettings();
+      }
+      return null;
+    }
+
+    // Step 3 (Obtain Current Position)
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+    } catch (e) {
+      debugPrint("Error getting position: $e");
+      return null;
+    }
+  }
+}

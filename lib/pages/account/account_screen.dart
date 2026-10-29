@@ -44,22 +44,45 @@ class _AccountPageState extends State<AccountPage> {
   void callgetProfileAPI() async {
     var internet = await UtilClass.checkInternet();
     if (internet) {
+      final String userId = (profileDetails["id"] ??
+              profileDetails["user_id"] ??
+              userData["user_id"] ??
+              userData["id"] ??
+              Preferences.getUserID() ??
+              "")
+          .toString()
+          .trim();
+      if (userId.isEmpty) return;
+
       // ignore: use_build_context_synchronously
       UtilClass.showProgress(context: context);
       await Repository.postApiService(EndPoints.profile, {
-        "user_id": userData["user_id"] ?? "",
+        "user_id": userId,
       }).then((value) async {
         UtilClass.hideProgress();
         dynamic parsed = {};
         try {
           parsed = await json.decode(value);
           if (parsed["status"] == "valid") {
+            final p = parsed["profile"] ?? {};
             setState(() {
               subscriptionCount = parsed["subscription_count"];
+              profileDetails = p;
             });
-            setState(() {
-              profileDetails = parsed["profile"];
-            });
+            try {
+              final userMap = Map<String, dynamic>.from(userData ?? {});
+              if (p is Map) {
+                p.forEach((k, v) {
+                  if (v != null) userMap[k.toString()] = v;
+                });
+              }
+              userMap["user_id"] = userId;
+              Preferences.setUserDetails(json.encode(userMap));
+              if (p["name"] != null && p["name"].toString().isNotEmpty) {
+                Preferences.setName(p["name"].toString());
+              }
+              userData = userMap;
+            } catch (_) {}
           } else {
             // ignore: use_build_context_synchronously
             UtilClass.showAlertDialog(
@@ -76,6 +99,124 @@ class _AccountPageState extends State<AccountPage> {
     } else {
       // ignore: use_build_context_synchronously
       UtilClass.showAlertDialog(context: context, message: Config.kNoInternet);
+    }
+  }
+
+  void _showDeleteAccountDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text("Delete Account"),
+          content: const Text(
+            "Are you sure you want to delete your account? This action cannot be undone.",
+          ),
+          actions: [
+            TextButton(
+              child: const Text("No"),
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+              },
+            ),
+            TextButton(
+              child: const Text("Yes", style: TextStyle(color: Colors.red)),
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _deleteAccount();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _deleteAccount() async {
+    final String userId = (profileDetails["id"] ??
+            profileDetails["user_id"] ??
+            userData["user_id"] ??
+            userData["id"] ??
+            Preferences.getUserID() ??
+            "")
+        .toString();
+
+    if (userId.isEmpty) {
+      UtilClass.showAlertDialog(
+        context: context,
+        message: "User ID not found. Please log in again.",
+      );
+      return;
+    }
+
+    bool internet = await UtilClass.checkInternet();
+    if (!internet) {
+      if (mounted) {
+        UtilClass.showAlertDialog(
+          context: context,
+          message: Config.kNoInternet,
+        );
+      }
+      return;
+    }
+
+    if (mounted) {
+      UtilClass.showProgress(context: context);
+    }
+
+    try {
+      final response = await Repository.postApiService(
+        EndPoints.inactiveUser,
+        {"id": userId},
+      );
+
+      UtilClass.hideProgress();
+
+      final parsed = response is String ? json.decode(response) : response;
+
+      if (parsed != null &&
+          (parsed["status"] == "valid" || parsed["status"] == true)) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Your account has been successfully deleted"),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+
+        await Future.delayed(const Duration(seconds: 2));
+
+        if (!mounted) return;
+
+        await Preferences.initSharedPreference();
+        await Preferences.clearPreference();
+
+        if (!mounted) return;
+
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => const LoginScreen(),
+          ),
+          (Route route) => false,
+        );
+      } else {
+        if (mounted) {
+          UtilClass.showAlertDialog(
+            context: context,
+            message: parsed?["message"] ??
+                "Failed to deactivate user. Please try again.",
+          );
+        }
+      }
+    } catch (e) {
+      UtilClass.hideProgress();
+      if (mounted) {
+        UtilClass.showAlertDialog(
+          context: context,
+          message: "Internal Server Error. Please try again.",
+        );
+      }
     }
   }
 
@@ -181,27 +322,34 @@ class _AccountPageState extends State<AccountPage> {
                                     radius: deviceWidth * 0.08,
                                     backgroundColor: Colors.grey.shade200,
                                     child: ClipOval(
-                                      child: (profileDetails['profile'] != null &&
-                                              profileDetails['profile'].toString().trim().isNotEmpty)
-                                          ? Image.network(
-                                              UtilClass.formatProfileImageUrl(
-                                                  profileDetails['profile'].toString()),
-                                              width: deviceWidth * 0.16,
-                                              height: deviceWidth * 0.16,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (context, error, stackTrace) {
-                                                return const Icon(
-                                                  Icons.person,
-                                                  size: 36,
-                                                  color: Colors.grey,
-                                                );
-                                              },
-                                            )
-                                          : const Icon(
-                                              Icons.person,
-                                              size: 36,
-                                              color: Colors.grey,
-                                            ),
+                                      child: (() {
+                                        final String profileImg = (profileDetails['profile'] != null &&
+                                                profileDetails['profile'].toString().trim().isNotEmpty)
+                                            ? profileDetails['profile'].toString().trim()
+                                            : (userData['profile'] ?? userData['profile_image'] ?? '')
+                                                .toString()
+                                                .trim();
+                                        if (profileImg.isNotEmpty) {
+                                          return Image.network(
+                                            UtilClass.formatProfileImageUrl(profileImg),
+                                            width: deviceWidth * 0.16,
+                                            height: deviceWidth * 0.16,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (context, error, stackTrace) {
+                                              return const Icon(
+                                                Icons.person,
+                                                size: 36,
+                                                color: Colors.grey,
+                                              );
+                                            },
+                                          );
+                                        }
+                                        return const Icon(
+                                          Icons.person,
+                                          size: 36,
+                                          color: Colors.grey,
+                                        );
+                                      })(),
                                     ),
                                   ),
 
@@ -230,7 +378,9 @@ class _AccountPageState extends State<AccountPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
      Text(
-  profileDetails["name"] ?? "",
+  (profileDetails["name"] != null && profileDetails["name"].toString().trim().isNotEmpty)
+      ? profileDetails["name"].toString()
+      : (userData["name"] ?? Preferences.getName() ?? "Provider"),
   style: const TextStyle(
     fontSize: 18,
     fontWeight: FontWeight.bold,
@@ -414,7 +564,7 @@ class _AccountPageState extends State<AccountPage> {
       arguments: {
         'referral_code': (profileDetails['referral_id'] != null && profileDetails['referral_id'].toString().isNotEmpty)
             ? profileDetails['referral_id']
-            : (profileDetails['referral_code'] ?? ""),
+            : (profileDetails['referral_code'] ?? userData['referral_id'] ?? userData['referral_code'] ?? ""),
       },
     );
   },
@@ -426,6 +576,15 @@ class _AccountPageState extends State<AccountPage> {
                     "Request Tool",
                     onTap: () {
                       Navigator.pushNamed(context, Config.requestToolRouteName);
+                    },
+                  ),
+                  const Divider(height: 1, color: Color(0xFFE0E0E0)),
+                  _buildListTile(
+                    Icons.delete_outline,
+                    "Delete Account",
+                    color: Colors.red,
+                    onTap: () {
+                      _showDeleteAccountDialog();
                     },
                   ),
                   const Divider(height: 1, color: Color(0xFFE0E0E0)),

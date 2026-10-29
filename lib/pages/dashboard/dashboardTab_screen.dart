@@ -29,7 +29,7 @@ class DashboardTabScreen extends StatefulWidget {
   State<DashboardTabScreen> createState() => _DashboardTabScreenState();
 }
 
-class _DashboardTabScreenState extends State<DashboardTabScreen> {
+class _DashboardTabScreenState extends State<DashboardTabScreen> with WidgetsBindingObserver {
   int currentIndex = 0;
   dynamic profileDetails = {};
   dynamic dashBoardDetails = {};
@@ -127,6 +127,7 @@ GetUpdateAddressModel? pushintoUpdateAddressModel;
 @override
 void initState() {
   super.initState();
+  WidgetsBinding.instance.addObserver(this);
 
   var userDataValue = Preferences.getUserDetails();
   if (userDataValue != null) {
@@ -161,6 +162,10 @@ void initState() {
   _currentPage = 0;
   _startAutoScroll();
 
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _checkLocationOnStartup();
+  });
+
   _pageController.addListener(() {
     final next = _pageController.page?.round();
     if (next != null && _currentPage != next) {
@@ -182,6 +187,7 @@ void initState() {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _pageController.dispose();
     _userCheckTimer?.cancel();
@@ -264,28 +270,58 @@ void initState() {
     return ok;
   }
 
+  /// Checks if location service is on when opening the dashboard.
+  /// If off, asks permission/prompts the provider to turn it on.
+  
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkLocationOnResume();
+    }
+  }
+
+  Future<void> _checkLocationOnResume() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (serviceEnabled &&
+          (permission == LocationPermission.always ||
+           permission == LocationPermission.whileInUse)) {
+        if (!_isFetchingLocation && mounted) {
+          await _fetchCurrentLocation();
+        }
+      }
+    } catch (e) {
+      debugPrint("Error checking location on resume: $e");
+    }
+  }
+
+  Future<void> _checkLocationOnStartup() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled && mounted) {
+        await UtilClass.checkAndRequestLocation(
+          context,
+          message:
+              "Your mobile location is turned off. Please turn on location services to receive customer orders in your area.",
+        );
+      }
+    } catch (_) {}
+  }
+
   // ── Fetch device GPS location, reverse-geocode it, then push it live to the server ──
   Future<void> _fetchCurrentLocation() async {
     setState(() => _isFetchingLocation = true);
     try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.deniedForever) {
-        if (mounted) {
-          UtilClass.showAlertDialog(
-            context: context,
-            message:
-                "Location permission permanently denied. Enable it in settings.",
-          );
-        }
+      final position = await UtilClass.checkAndRequestLocation(
+        context,
+        message:
+            "Your device location / GPS is turned off. Please turn on location services so GoBuddy can accurately detect your service location.",
+      );
+
+      if (position == null) {
         return;
       }
-
-      final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
 
       final placemarks = await placemarkFromCoordinates(
         position.latitude,
@@ -646,8 +682,11 @@ Future<void> _getDashboardSubscriptions()async {
   }
 
   try {
+    final String pId = (userData?['user_id'] ?? userData?['id'] ?? Preferences.getUserID() ?? '').toString().trim();
+    if (pId.isEmpty) return;
+
     final response = await Repository.postApiService(EndPoints.getMySUbscriptonDashboard, {
-      'provider_id' : userData['user_id']?? ""
+      'provider_id' : pId
     });
 
     Map<String, dynamic>jsonResponse;
@@ -676,9 +715,11 @@ Future<void> _getMyEarningsIncome()async {
   }
 
   try {
+    final String pId = (userData?['user_id'] ?? userData?['id'] ?? Preferences.getUserID() ?? '').toString().trim();
+    if (pId.isEmpty) return;
     
   final response = await Repository.postApiService(EndPoints.getmyEarnings, {
-    'provider_id' : userData['user_id'] ?? ""
+    'provider_id' : pId
   });
 
   Map<String, dynamic>jsonResponse;
@@ -757,8 +798,8 @@ Future<void> _getMyEarningsIncome()async {
 
 Future<void> _getProviderRating() async {
   try {
-    final pId = userData?['user_id'];
-    if (pId == null) return;
+    final String pId = (userData?['user_id'] ?? userData?['id'] ?? Preferences.getUserID() ?? '').toString().trim();
+    if (pId.isEmpty) return;
     final response = await Repository.postApiService(
       EndPoints.providerRatingsReviews,
       {"provider_id": pId},
@@ -793,10 +834,13 @@ Future<void> _getMyProfileDetails() async {
   }
 
   try {
+    final String pId = (userData?['user_id'] ?? userData?['id'] ?? Preferences.getUserID() ?? '').toString().trim();
+    if (pId.isEmpty) return;
+
     final response = await Repository.postApiService(
       EndPoints.getProfileDetails,
       {
-        'user_id': userData?['user_id'],
+        'user_id': pId,
       },
     );
 
@@ -827,12 +871,70 @@ Future<void> _getMyProfileDetails() async {
     try {
       final userMap = Map<String, dynamic>.from(userData ?? {});
       userMap['isVerified'] = isApproved;
-      if (p?.adminApprovalProvider != null) userMap['admin_approval_provider'] = p!.adminApprovalProvider;
-      if (p?.ekycStatus != null) userMap['ekyc_status'] = p!.ekycStatus;
-      if (p?.ekycStatusName != null) userMap['ekyc_status_name'] = p!.ekycStatusName;
+      if (p != null) {
+        if (p.name != null && p.name!.isNotEmpty) {
+          userMap['name'] = p.name;
+          Preferences.setName(p.name!);
+        }
+        if (p.profile != null && p.profile!.isNotEmpty) userMap['profile'] = p.profile;
+        if (p.skills != null) userMap['skills'] = p.skills;
+        if (p.address != null) userMap['address'] = p.address;
+        if (p.email != null) userMap['email'] = p.email;
+        if (p.phoneNumber != null) userMap['phone_number'] = p.phoneNumber;
+        if (p.adminApprovalProvider != null) userMap['admin_approval_provider'] = p.adminApprovalProvider;
+        if (p.ekycStatus != null) userMap['ekyc_status'] = p.ekycStatus;
+        if (p.ekycStatusName != null) userMap['ekyc_status_name'] = p.ekycStatusName;
+
+        // In backend/DB: ekyc_status 0 = Pending, 1 = Approved
+        final statStr = p.ekycStatus?.toString().trim();
+        final nameStr = p.ekycStatusName?.toString().trim().toLowerCase();
+        if (statStr == "0" || statStr == "1" || nameStr == "pending" || nameStr == "approved") {
+          userMap['ekyc'] = "1";
+        }
+        if (profMap["registration_fee"] != null) userMap['registration_fee'] = profMap["registration_fee"];
+        if (profMap["registration_fee_status"] != null) userMap['registration_fee_status'] = profMap["registration_fee_status"];
+      }
       Preferences.setUserDetails(json.encode(userMap));
       userData = userMap;
     } catch (_) {}
+
+    final String ekycStat = (p?.ekycStatus ?? userData?["ekyc_status"] ?? "").toString().trim().toLowerCase();
+    final String ekycName = (p?.ekycStatusName ?? userData?["ekyc_status_name"] ?? "").toString().trim().toLowerCase();
+    final String localEkyc = (userData?["ekyc"] ?? "").toString().trim().toLowerCase();
+
+    // In backend/DB:
+    // ekyc_status = 0 -> "Pending" (documents uploaded, awaiting verification)
+    // ekyc_status = 1 -> "Approved"
+    // ekyc_status = 2 -> "Rejected"
+    // Therefore, status 0 or 1, or name 'Pending' / 'Approved' means documents ARE submitted!
+    final bool hasEkyc = isApproved ||
+        ekycStat == "0" ||
+        ekycStat == "1" ||
+        ekycName == "pending" ||
+        ekycName == "approved" ||
+        localEkyc == "1" ||
+        localEkyc == "true" ||
+        localEkyc == "submitted" ||
+        (p?.ekycStatus != null &&
+            p!.ekycStatus.toString().isNotEmpty &&
+            p.ekycStatus.toString() != "2" &&
+            p.ekycStatus.toString() != "-1");
+
+    final bool hasFee = (profMap["registration_fee"] == "1" || profMap["registration_fee_status"] == "1" ||
+        profMap["status"] == "1" || profMap["status"] == 1 ||
+        userData?["registration_fee"] == "1" || userData?["registration_fee_status"] == "1" ||
+        userData?["status"] == "1" || userData?["status"] == 1 ||
+        (dashboardDetails.subscriptionCount != null && dashboardDetails.subscriptionCount! > 0) ||
+        isApproved);
+
+    if (!isApproved && (!hasEkyc || !hasFee) && mounted) {
+      if (!hasEkyc) {
+        Navigator.of(context).pushReplacementNamed(Config.ekycRouteName);
+      } else if (!hasFee) {
+        Navigator.of(context).pushReplacementNamed(Config.regiFeeRouteName);
+      }
+      return;
+    }
   } catch (e) {
     debugPrint("Error fetching profile details: $e");
     print("Error fetching profile details: $e");
@@ -1200,8 +1302,14 @@ Future<void> _getMyOrderAlert() async {
       if (parsed != null && (parsed["status"] == "valid" || parsed["status"] == true || parsed["status"] == "success")) {
         final ordId = order.orderId?.toString().trim() ?? "";
         final calId = order.jobCalendarId?.toString().trim() ?? "";
-        if (ordId.isNotEmpty) handledOrderIds.add(ordId);
-        if (calId.isNotEmpty) handledOrderIds.add(calId);
+        if (ordId.isNotEmpty) {
+          handledOrderIds.add(ordId);
+          Preferences.addAcceptedOrderId(ordId);
+        }
+        if (calId.isNotEmpty) {
+          handledOrderIds.add(calId);
+          Preferences.addAcceptedOrderId(calId);
+        }
         _lastOrderId = ordId.isNotEmpty ? ordId : calId;
         _stopRingtone();
         _isAlertShowing = false;
@@ -1213,13 +1321,57 @@ Future<void> _getMyOrderAlert() async {
         _getMyEarningsIncome();
         _getDashboardSubscriptions();
 
-        // Navigate provider to My Orders screen
-        Navigator.pushNamed(context, Config.myOrdersRouteName);
-      } else {
-        UtilClass.showAlertDialog(
-          context: context,
-          message: parsed?["message"] ?? "Unable to accept order. It may have already been assigned.",
+        // Navigate provider to My Orders screen on Pending tab since order was accepted
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const MyOrdersScreen(initialTab: "Pending"),
+          ),
         );
+      } else {
+        final errMsg = parsed?["message"]?.toString() ?? "Unable to accept order. It may have already been assigned.";
+        if (errMsg.toLowerCase().contains("subscription") || errMsg.toLowerCase().contains("expired")) {
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: const [
+                  Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+                  SizedBox(width: 8),
+                  Text("Subscription Expired", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: Text(errMsg, style: const TextStyle(fontSize: 14, height: 1.4)),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text("Dismiss"),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2ECC71),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Navigator.pushNamed(
+                      context,
+                      Config.mySubscriptionsRouteName,
+                      arguments: {'issubscription': true},
+                    );
+                  },
+                  child: const Text("Renew Now", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          );
+        } else {
+          UtilClass.showAlertDialog(
+            context: context,
+            message: errMsg,
+          );
+        }
       }
     } catch (e) {
       UtilClass.hideProgress();
@@ -1530,113 +1682,142 @@ Future<void> _getMyOrderAlert() async {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                CircleAvatar(
-  radius: screenWidth * 0.075,
-  backgroundColor: Colors.grey[200], // fallback background color
-  child: ClipOval(
-    child: getmyProfile?.profile != null && getmyProfile!.profile!.isNotEmpty
-        ? Image.network(
-            getmyProfile?.profile??"",
-            fit: BoxFit.cover,
-            width: double.infinity,
-            height: double.infinity,
-            errorBuilder: (context, error, stackTrace) {
-              // Show broken icon if image fails to load
-              return Icon(
-                Icons.broken_image,
-                size: screenWidth * 0.075,
-                color: Colors.grey,
-              );
-            },
-          )
-        : Icon(
-            Icons.person, // default icon if no profile image
-            size: screenWidth * 0.075,
-            color: Colors.grey,
-          ),
-  ),
-),
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.pushNamed(
+                              context,
+                              Config.viewProfileRouteName,
+                            ).then((_) {
+                              _getMyProfileDetails();
+                            });
+                          },
+                          child: Row(
+                            children: [
+                              Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  CircleAvatar(
+                                    radius: screenWidth * 0.075,
+                                    backgroundColor: Colors.grey[200], // fallback background color
+                                    child: ClipOval(
+                                      child: (() {
+                                        final String profileImg = (getmyProfile?.profile != null &&
+                                                getmyProfile!.profile!.trim().isNotEmpty)
+                                            ? getmyProfile!.profile!.trim()
+                                            : (userData?['profile'] ??
+                                                    userData?['profile_image'] ??
+                                                    '')
+                                                .toString()
+                                                .trim();
+                                        if (profileImg.isNotEmpty) {
+                                          return Image.network(
+                                            UtilClass.formatProfileImageUrl(profileImg),
+                                            fit: BoxFit.cover,
+                                            width: double.infinity,
+                                            height: double.infinity,
+                                            errorBuilder: (context, error, stackTrace) {
+                                              return Icon(
+                                                Icons.person,
+                                                size: screenWidth * 0.075,
+                                                color: Colors.grey,
+                                              );
+                                            },
+                                          );
+                                        }
+                                        return Icon(
+                                          Icons.person, // default icon if no profile image
+                                          size: screenWidth * 0.075,
+                                          color: Colors.grey,
+                                        );
+                                      })(),
+                                    ),
+                                  ),
 
-                                // Green Tick for Verified Provider (Below Profile Image)
-                                if (isVerified)
-                                  Positioned(
-                                    bottom: -2,
-                                    left: 0,
-                                    right: -21,
-                                    child: Center(
-                                      child: Container(
-                                        // decoration: BoxDecoration(
-                                        //   color: Colors.white,
-                                        //   shape: BoxShape.circle,
-                                        // ),
-                                        child: Icon(
-                                          Icons.check_circle,
-                                          color: green,
-                                          size: screenWidth * 0.05,
+                                  // Green Tick for Verified Provider (Below Profile Image)
+                                  if (isVerified)
+                                    Positioned(
+                                      bottom: -2,
+                                      left: 0,
+                                      right: -21,
+                                      child: Center(
+                                        child: Container(
+                                          child: Icon(
+                                            Icons.check_circle,
+                                            color: green,
+                                            size: screenWidth * 0.05,
+                                          ),
                                         ),
                                       ),
                                     ),
+                                ],
+                              ),
+                              SizedBox(width: screenWidth * 0.03),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    (getmyProfile?.name != null &&
+                                            getmyProfile!.name!.trim().isNotEmpty)
+                                        ? getmyProfile!.name!.trim()
+                                        : (userData?['name'] ??
+                                                Preferences.getName() ??
+                                                "Provider")
+                                            .toString()
+                                            .trim(),
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: screenWidth * 0.048,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
-                              ],
-                            ),
-                            SizedBox(width: screenWidth * 0.03),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  getmyProfile?.name??"",
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: screenWidth * 0.048,
-                                    fontWeight: FontWeight.bold,
+                                  Text(
+                                    (getmyProfile?.skills != null &&
+                                            getmyProfile!.skills!.trim().isNotEmpty)
+                                        ? getmyProfile!.skills!.trim()
+                                        : (userData?['skills'] ??
+                                                userData?['working_category'] ??
+                                                "")
+                                            .toString()
+                                            .trim(),
+                                    maxLines: 2,
+                                    softWrap: false,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: screenWidth * 0.020,
+                                    ),
                                   ),
-                                ),
-                             Text(
-  getmyProfile?.skills ?? "",
-  maxLines: 2,             
-  softWrap: false,
-  overflow: TextOverflow.ellipsis, 
-  style: TextStyle(
-    color: Colors.white70,
-    fontSize: screenWidth * 0.020,
-  ),
-)
 
-,
-                                // Provider Rating (Only if Verified)
-                                if (isVerified)
-                                  Row(
-                                    children: [
-                                      ...List.generate(
-                                        5,
-                                        (index) => Icon(
-                                          index <
-                                                  (dashboardData["rating"] ?? 0)
-                                                      .toInt()
-                                              ? Icons.star
-                                              : Icons.star_border,
-                                          color: Colors.yellow,
-                                          size: screenWidth * 0.035,
+                                  // Provider Rating (Only if Verified)
+                                  if (isVerified)
+                                    Row(
+                                      children: [
+                                        ...List.generate(
+                                          5,
+                                          (index) => Icon(
+                                            index <
+                                                    (dashboardData["rating"] ?? 0)
+                                                        .toInt()
+                                                ? Icons.star
+                                                : Icons.star_border,
+                                            color: Colors.yellow,
+                                            size: screenWidth * 0.035,
+                                          ),
                                         ),
-                                      ),
-                                      SizedBox(width: 4),
-                                      Text(
-                                        "${dashboardData["rating"] ?? 0}/5",
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: screenWidth * 0.035,
+                                        SizedBox(width: 4),
+                                        Text(
+                                          "${dashboardData["rating"] ?? 0}/5",
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: screenWidth * 0.035,
+                                          ),
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                              ],
-                            ),
-                          ],
+                                      ],
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                         // Notification Icon and PENDING Tag
                         Row(
@@ -1652,7 +1833,7 @@ Future<void> _getMyOrderAlert() async {
                                   Navigator.pushNamed(
                                     context,
                                     arguments: {
-                                      'provider_id' : userData['user_id']
+                                      'provider_id' : (userData?['user_id'] ?? userData?['id'] ?? Preferences.getUserID() ?? '').toString()
                                     },
                                      Config.getNotificationsScreen);
                                 },
@@ -1688,7 +1869,13 @@ Future<void> _getMyOrderAlert() async {
                             child: Text(
                               _currentAddress.isNotEmpty
                                   ? _currentAddress
-                                  : (getmyProfile?.address ?? ""),
+                                  : ((getmyProfile?.address != null &&
+                                          getmyProfile!.address!.trim().isNotEmpty)
+                                      ? getmyProfile!.address!.trim()
+                                      : (userData?['address'] ??
+                                              userData?['location'] ??
+                                              "Select Location")
+                                          .toString()),
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 12,
@@ -2156,12 +2343,17 @@ Future<void> _getMyOrderAlert() async {
    );
  }
 
-  // Helper widget for a single subscription plan tile
+// Helper widget for a single subscription plan tile
 Widget _buildSubscriptionPlanTile(
   Data data,
   double screenWidth,
   double screenHeight,
 ) {
+  bool isTimeBased = (data.packageType?.toLowerCase().trim() == 'time') || 
+                     (data.packageType?.toLowerCase().trim() == 'month') || 
+                     (data.packageType?.toLowerCase().trim() == 'months') ||
+                     (data.package?.toLowerCase().contains("month") ?? false);
+
   return Padding(
     padding: EdgeInsets.all(screenWidth * 0.04),
     child: Column(
@@ -2175,8 +2367,8 @@ Widget _buildSubscriptionPlanTile(
           ),
         ),
         SizedBox(height: screenHeight * 0.005),
-        Text("Jobs: ${data.jobs ?? 0}"),
-        Text("Remaining: ${data.remaining ?? 0}"),
+        Text(isTimeBased ? "Unlimited Jobs (${data.jobs ?? 0} Months)" : "Jobs: ${data.jobs ?? 0} (Lifetime)"),
+        Text(isTimeBased ? "Remaining: Unlimited" : "Remaining: ${data.remaining ?? 0}"),
         Text("Used: ${data.used ?? 0}"),
         Text("Amount: ₹${data.amount ?? 0}"),
         SizedBox(height: screenHeight * 0.01),
@@ -2317,7 +2509,7 @@ Widget _buildSubscriptionPlanTile(
        ListView.builder(
   shrinkWrap: true,
   physics: const NeverScrollableScrollPhysics(),
-  itemCount: subscriptions.length,
+  itemCount: subscriptions.isNotEmpty ? 1 : 0,
   itemBuilder: (context, index) {
     final data = subscriptions[index];
 
@@ -2361,10 +2553,13 @@ Widget _buildSubscriptionPlanTile(
 
             // 🔹 SERVICES LIST
             ...(data.services ?? []).map((service) {
+              final serviceTitle = (service.serviceName != null && service.serviceName!.trim().isNotEmpty)
+                  ? service.serviceName!.trim()
+                  : "Service ID: ${service.serviceId}";
               return ListTile(
                 title: Text(
-                  "Service ID: ${service.serviceId}",
-                  style: TextStyle(fontSize: screenWidth * 0.035),
+                  serviceTitle,
+                  style: TextStyle(fontSize: screenWidth * 0.035, fontWeight: FontWeight.w600),
                 ),
                 subtitle: Text(
                   "Price: ₹${service.price} | Used: ${service.usedJobs}",

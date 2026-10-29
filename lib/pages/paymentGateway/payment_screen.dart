@@ -15,6 +15,8 @@ class PaymentMethodScreen extends StatefulWidget {
   
   final double amount;
   final String fromScreen;
+  final String? referralCode;
+  final String? savingAmount;
   final VoidCallback? onBackPressed;
   final Function(PaymentMethod)? onPaymentMethodSelected;
   final VoidCallback? onPayPressed;
@@ -23,6 +25,8 @@ class PaymentMethodScreen extends StatefulWidget {
     super.key,
     required this.amount,
     required this.fromScreen,
+    this.referralCode,
+    this.savingAmount,
     this.onBackPressed,
     this.onPaymentMethodSelected,
     this.onPayPressed,
@@ -55,10 +59,12 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
       // ignore: use_build_context_synchronously
       UtilClass.showProgress(context: context);
       await Repository.postApiService(EndPoints.onetimeregistrationApi, {
-        "user_id": userData["user_id"] ?? "",
+        "user_id": (userData["user_id"] ?? Preferences.getUserID() ?? "").toString(),
         "amount": widget.amount.toStringAsFixed(0),
-        "referral_code": "",
-        "saving_amount": "0",
+        "referral_code": (widget.referralCode != null && widget.referralCode!.isNotEmpty)
+            ? widget.referralCode!
+            : (userData["referral_code"] ?? ""),
+        "saving_amount": widget.savingAmount ?? "0",
         "payment_id": "PAY_${DateTime.now().millisecondsSinceEpoch}",
       }).then((value) async {
         UtilClass.hideProgress();

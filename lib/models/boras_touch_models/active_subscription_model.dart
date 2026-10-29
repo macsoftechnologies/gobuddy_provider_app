@@ -58,8 +58,8 @@ class Data {
       categoryId: json['category_id']?.toString(),
       subscription: json['subscription']?.toString(),
       packageType: json['package_type']?.toString(),
-      packageValue: json['package_value']?.toString() ?? json['jobs']?.toString() ?? '0',
-      packageAmount: json['package_amount']?.toString() ?? json['package']?.toString() ?? json['amount']?.toString() ?? '0',
+      packageValue: json['package_value']?.toString() ?? json['package_details']?['value']?.toString() ?? json['jobs']?.toString() ?? '0',
+      packageAmount: json['package_amount']?.toString() ?? json['package_details']?['amount']?.toString() ?? json['amount']?.toString() ?? json['package']?.toString() ?? '0',
       used: json['used'] is int ? json['used'] : int.tryParse(json['used']?.toString() ?? '0') ?? 0,
       missed: json['missed'] is int ? json['missed'] : int.tryParse(json['missed']?.toString() ?? '0') ?? 0,
       remaining: json['remaining'] is int ? json['remaining'] : int.tryParse(json['remaining']?.toString() ?? '0') ?? 0,
@@ -76,6 +76,11 @@ class Data {
   }
 
   bool get isActive => statusText?.toLowerCase() == 'active';
+
+  bool get isTimeBased {
+    final t = packageType?.toLowerCase().trim() ?? '';
+    return t == 'time' || t == 'months' || t == 'month' || t == 'duration';
+  }
 
   int get totalJobs => int.tryParse(packageValue ?? '0') ?? 0;
 
@@ -115,6 +120,7 @@ class Services {
   String? subscriptionServiceId;
   String? subCategoryId;
   String? serviceId;
+  String? serviceName;
   String? price;
   String? discount;
   String? type;
@@ -130,6 +136,7 @@ class Services {
     this.subscriptionServiceId,
     this.subCategoryId,
     this.serviceId,
+    this.serviceName,
     this.price,
     this.discount,
     this.type,
@@ -147,6 +154,7 @@ class Services {
       subscriptionServiceId: json['subscription_service_id'],
       subCategoryId: json['sub_category_id'],
       serviceId: json['service_id'],
+      serviceName: (json['service_name'] ?? json['service_title'] ?? json['title'])?.toString(),
       price: json['price'],
       discount: json['discount'],
       type: json['type'],

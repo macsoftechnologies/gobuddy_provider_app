@@ -43,7 +43,13 @@ GetRegistrationModel?pushintoRegModel;
   Future<void> callLocation() async {
     setState(() => isDetectingLocation = true);
     try {
-      Position location = await _determinePosition();
+      final Position? location = await UtilClass.checkAndRequestLocation(
+        context,
+        message:
+            "Your device location / GPS is turned off. Please turn on location services so GoBuddy can auto-detect your address.",
+      );
+      if (location == null) return;
+
       currentLat = location.latitude;
       currentLong = location.longitude;
 
@@ -226,11 +232,48 @@ for (var cat in myCategories) {
   final TextEditingController _techCategoryController = TextEditingController();
   final TextEditingController _workingCategoryController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
+  final TextEditingController _dobController = TextEditingController();
   double? currentLat;
   double? currentLong;
   bool isDetectingLocation = false;
 
+  Future<void> _selectDateOfBirth() async {
+    final DateTime initial = DateTime.now().subtract(const Duration(days: 365 * 20));
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(1940),
+      lastDate: DateTime.now().subtract(const Duration(days: 365 * 14)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF4CAF50),
+              onPrimary: Colors.white,
+              onSurface: Colors.black87,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      final formatted = "${picked.day.toString().padLeft(2, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.year}";
+      setState(() {
+        dob = formatted;
+        _dobController.text = formatted;
+      });
+    }
+  }
 
+  @override
+  void dispose() {
+    _techCategoryController.dispose();
+    _workingCategoryController.dispose();
+    _addressController.dispose();
+    _dobController.dispose();
+    super.dispose();
+  }
 
   Future<void> _pickImage(ImageSource source) async {
     final pickedFile = await ImagePicker().pickImage(source: source);
@@ -724,7 +767,7 @@ Referral: $referralCode
       });
 
       jsonResponse["user_id"] =
-          jsonResponse["user_id"].toString();
+          jsonResponse["user_id"]?.toString() ?? "";
 
       Preferences.setUserDetails(json.encode(jsonResponse));
 
@@ -732,8 +775,8 @@ Referral: $referralCode
         context,
         Config.otpRouteName,
         arguments: {
-          "phone": jsonResponse["phone_number"],
-          "user_id": jsonResponse["user_id"],
+          "phone": jsonResponse["phone_number"]?.toString() ?? "",
+          "user_id": jsonResponse["user_id"]?.toString() ?? "",
           "fromScreen": "register",
         },
       );
@@ -744,11 +787,11 @@ Referral: $referralCode
       );
     }
   } catch (e) {
-    print("Error: $e");
+    print("Registration error: $e");
 
     UtilClass.showAlertDialog(
       context: context,
-      message: "Internal Server Error",
+      message: "Something went wrong. Please try again.",
     );
   } finally {
     // ✅ ALWAYS runs (success / error / exception)
@@ -847,9 +890,15 @@ Referral: $referralCode
                 SizedBox(height: 15),
 
                 TextFormField(
-                  decoration: _inputDecoration('Date of Birth (DD/MM/YYYY)'),
-                  keyboardType: TextInputType.text,
-                  onChanged: (v) => setState(() => dob = v),
+                  controller: _dobController,
+                  readOnly: true,
+                  onTap: _selectDateOfBirth,
+                  decoration: _inputDecoration('Date of Birth (DD-MM-YYYY)').copyWith(
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.calendar_month, color: Color(0xFF4CAF50)),
+                      onPressed: _selectDateOfBirth,
+                    ),
+                  ),
                   validator: _validateDob,
                 ),
                 SizedBox(height: 15),
@@ -933,24 +982,45 @@ Referral: $referralCode
                 ),
                 SizedBox(height: 15),
 
-                TextFormField(
-                  decoration: _inputDecoration('Referral Code (Optional)'),
-                  onChanged: (v) => referralCode = v,
-                ),
-                SizedBox(height: 15),
+
 
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Checkbox(
                       value: acceptTerms,
+                      activeColor: const Color(0xFF4CAF50),
                       onChanged: (val) {
                         setState(() => acceptTerms = val ?? false);
                       },
                     ),
                     Expanded(
-                      child: Text(
-                        "Accept Terms and Conditions",
-                        style: TextStyle(color: Colors.black),
+                      child: GestureDetector(
+                        onTap: () async {
+                          final accepted = await Navigator.pushNamed(
+                            context,
+                            Config.termsConditionsRouteName,
+                          );
+                          if (accepted == true) {
+                            setState(() => acceptTerms = true);
+                          }
+                        },
+                        child: RichText(
+                          text: const TextSpan(
+                            text: "I accept the ",
+                            style: TextStyle(color: Colors.black87, fontSize: 14),
+                            children: [
+                              TextSpan(
+                                text: "Terms and Conditions",
+                                style: TextStyle(
+                                  color: Color(0xFF4CAF50),
+                                  fontWeight: FontWeight.bold,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ],

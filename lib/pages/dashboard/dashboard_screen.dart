@@ -128,30 +128,23 @@ class _DashboardPageState extends State<DashboardPage> {
           });
         },
       ),
-      body: getBody(currentIndex),
+      body: IndexedStack(
+        index: currentIndex,
+        children: [
+          const DashboardTabScreen(),
+          MyOrdersScreen(
+            onBackToHome: () {
+              setState(() {
+                currentIndex = 0;
+              });
+            },
+          ),
+          const MyTutorialsScreen(),
+          const AccountPage(),
+        ],
+      ),
       ),
     );
-  }
-
-  Widget getBody(int index) {
-    switch (index) {
-      case 0:
-        return DashboardTabScreen();
-      case 1:
-        return MyOrdersScreen(
-          onBackToHome: () {
-            setState(() {
-              currentIndex = 0;
-            });
-          },
-        ); //MyOrdersScreen
-      case 2:
-        return MyTutorialsScreen();  
-      case 3:
-        return AccountPage(); //AccountPage
-      default:
-        return DashboardTabScreen();
-    }
   }
 
   

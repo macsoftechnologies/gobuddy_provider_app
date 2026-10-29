@@ -63,7 +63,7 @@ class _EKYCVerificationPageState extends State<EKYCVerificationPage> {
         {"user_id": userId},
       );
       final dynamic parsed = response is String ? json.decode(response) : response;
-      if (parsed != null && (parsed["status"] == "valid" || parsed["status"] == true)) {
+      if (parsed != null && (parsed["status"] == "valid" || parsed["status"] == true || parsed["status"] == "success")) {
         final data = parsed["data"] ?? parsed["ekyc"] ?? parsed;
         setState(() {
           if (data["aadhar_front"] != null && data["aadhar_front"].toString().isNotEmpty) {
@@ -277,6 +277,13 @@ class _EKYCVerificationPageState extends State<EKYCVerificationPage> {
             // );
           }
 
+          try {
+            final userMap = Map<String, dynamic>.from(userData is Map ? userData : {});
+            userMap['ekyc'] = '1';
+            Preferences.setUserDetails(json.encode(userMap));
+            userData = userMap;
+          } catch (_) {}
+
           final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
           final bool isFromAccount = args?['isFromAccount'] == true ||
               (Navigator.canPop(context) && (userData["admin_approval_provider"] != null || userData["token"] != null));
@@ -297,7 +304,7 @@ class _EKYCVerificationPageState extends State<EKYCVerificationPage> {
               // Return directly to My Documents screen
               Navigator.pop(context, true);
             } else {
-              // Initial registration flow -> proceed to Registration Fee screen
+              // Initial registration flow -> proceed directly to Registration Fee payment (₹300)
               Navigator.pushReplacementNamed(
                 context,
                 Config.regiFeeRouteName,
@@ -315,14 +322,70 @@ class _EKYCVerificationPageState extends State<EKYCVerificationPage> {
     }
   }
 
+  Future<void> _handleExit(BuildContext context) async {
+    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    final bool isFromAccount = args?['isFromAccount'] == true;
+
+    if (isFromAccount && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+      return;
+    }
+
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+      return;
+    }
+
+    final bool? shouldExit = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("Exit Document Verification"),
+        content: const Text(
+          "Document verification is required to activate your provider account.\n\nYou can upload documents at any time from your Account Setup Status.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("Stay"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4CAF50)),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text("Back to Status", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldExit == true && context.mounted) {
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        Config.onboardingStatusRouteName,
+        (route) => false,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        leading: CustomBackButton(),
-        backgroundColor: Colors.white,
-        elevation: 0,
-      ),
+    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    final bool isFromAccount = args?['isFromAccount'] == true;
+
+    return PopScope(
+      canPop: isFromAccount && Navigator.canPop(context),
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          _handleExit(context);
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: CustomBackButton(
+            onBack: () => _handleExit(context),
+          ),
+          backgroundColor: Colors.white,
+          elevation: 0,
+        ),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0),
         child: SingleChildScrollView(
@@ -492,6 +555,7 @@ class _EKYCVerificationPageState extends State<EKYCVerificationPage> {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 }

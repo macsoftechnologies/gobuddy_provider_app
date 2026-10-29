@@ -419,7 +419,7 @@ const _SubscriptionCard({
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${subscription.subscription ?? '—'}  ( ${subscription.totalJobs} Jobs )',
+                      '${subscription.subscription ?? '—'}  ( ${subscription.isTimeBased ? "Unlimited Jobs, ${subscription.packageValue} Months" : "${subscription.totalJobs} Jobs (Lifetime)"} )',
                       style: TextStyle(
                           fontSize: 13, color: Colors.grey.shade600),
                     ),
@@ -466,17 +466,17 @@ const _SubscriptionCard({
           Row(
             children: [
               _StatItem(
-                  label: 'Total Jobs',
-                  value: subscription.totalJobs.toString()),
+                  label: subscription.isTimeBased ? 'Total Months' : 'Total Jobs',
+                  value: subscription.isTimeBased ? (subscription.packageValue ?? '0') : subscription.totalJobs.toString()),
               _StatItem(
-                  label: 'Used',
+                  label: 'Used (Jobs)',
                   value: subscription.used?.toString() ?? '0'),
               _StatItem(
                   label: 'Missed',
                   value: subscription.missed?.toString() ?? '0'),
               _StatItem(
                   label: 'Remaining',
-                  value: subscription.remaining?.toString() ?? '0',
+                  value: subscription.isTimeBased ? 'Unlimited' : (subscription.remaining?.toString() ?? '0'),
                   isLast: true),
             ],
           ),
@@ -512,37 +512,45 @@ const _SubscriptionCard({
                 children: [
 
 
-                  // OutlinedButton(
-                  //   onPressed: () {},
-                  //   style: OutlinedButton.styleFrom(
-                  //     side: BorderSide(color: Colors.grey.shade400),
-                  //     padding: const EdgeInsets.symmetric(
-                  //         horizontal: 14, vertical: 8),
-                  //     shape: RoundedRectangleBorder(
-                  //         borderRadius: BorderRadius.circular(8)),
-                  //   ),
-                  //   child: const Text(
-                  //     'Change Prices',
-                  //     style:
-                  //         TextStyle(color: Colors.black87, fontSize: 13),
-                  //   ),
-                  // ),
-                  // const SizedBox(width: 8),
-                 
-                 
-                 
                   ElevatedButton(
-                   onPressed: onUpdate,
+                    onPressed: () {
+                      final subscriptionMap = {
+                        "subscription_id": subscription.subscriptionId,
+                        "category_id": subscription.categoryId,
+                        "category": subscription.category,
+                        "subscription": subscription.subscription,
+                        "package_type": subscription.packageType,
+                        "package_value": subscription.packageValue,
+                        "package_amount": subscription.packageAmount,
+                        "isPackage": false,
+                        "services": subscription.services?.map((service) => {
+                          "subscription_service_id": service.subscriptionServiceId,
+                          "sub_category_id": service.subCategoryId,
+                          "service_id": service.serviceId,
+                          "price": service.price,
+                          "discount": service.discount,
+                          "type": service.type,
+                          "status": service.status,
+                        }).toList() ?? [],
+                      };
+                      Navigator.pushNamed(
+                        context,
+                        Config.changePriceRouteName,
+                        arguments: subscriptionMap,
+                      ).then((_) {
+                        onUpdate();
+                      });
+                    },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF4CAF50),
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 8),
+                          horizontal: 16, vertical: 8),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8)),
                       elevation: 0,
                     ),
                     child: const Text(
-                      'Update',
+                      'Change Prices',
                       style: TextStyle(
                           color: Colors.white,
                           fontSize: 13,

@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gobuddy/data/preferences.dart';
-import 'package:gobuddy/pages/account/accountItems/mySubscription/update_plan_summary.dart';
 import 'package:gobuddy/services/end_points.dart';
 import 'package:gobuddy/services/repository.dart';
 import 'package:gobuddy/utils/config.dart';
@@ -263,18 +262,13 @@ class _ChangePricesScreenState extends State<ChangePricesScreen> {
                           selItem["subscription_service_id"] ?? "";
 
                       double totalvalue = 0;
-                      int amount = 0;
-                      int discount = 0;
-                      try {
-                        amount = double.parse(serverPrice).toInt();
-                      } catch (err) {}
-                      try {
-                        discount = double.parse(serverDiscount).toInt();
-                      } catch (err) {}
+                      double amount = double.tryParse(serverPrice?.toString() ?? "0") ?? 0.0;
+                      double discount = double.tryParse(serverDiscount?.toString() ?? "0") ?? 0.0;
 
                       totalvalue = typemode == "%"
                           ? (amount - (amount * discount) / 100)
-                          : (amount - discount).toDouble();
+                          : (amount - discount);
+                      if (totalvalue < 0) totalvalue = 0.0;
 
                       services[j]["ttotal"] = totalvalue.toString();
                       services[j]["acontroller"] = TextEditingController(
@@ -494,7 +488,7 @@ class _ChangePricesScreenState extends State<ChangePricesScreen> {
                                 ),
                               ),
                               Text(
-                                "₹ ${widget.subscriptiondetails["selectedPackage"]?["amount"] ?? widget.subscriptiondetails["selectedPackage"]?["package"] ?? widget.subscriptiondetails["package"] ?? widget.subscriptiondetails["amount"] ?? "0"}",
+                                "₹ ${widget.subscriptiondetails["selectedPackage"]?["amount"] ?? widget.subscriptiondetails["selectedPackage"]?["package_amount"] ?? widget.subscriptiondetails["selectedPackage"]?["package"] ?? widget.subscriptiondetails["package_amount"] ?? widget.subscriptiondetails["package_details"]?["amount"] ?? widget.subscriptiondetails["amount"] ?? "0"}",
                                 style: TextStyle(
                                   fontSize: size.width * 0.05,
                                   fontWeight: FontWeight.bold,
@@ -513,7 +507,7 @@ class _ChangePricesScreenState extends State<ChangePricesScreen> {
                                 ),
                               ),
                               Text(
-                                "₹ ${widget.subscriptiondetails["package"] ?? widget.subscriptiondetails["amount"] ?? widget.subscriptiondetails["package_amount"] ?? "0"}",
+                                "₹ ${widget.subscriptiondetails["package_amount"] ?? widget.subscriptiondetails["package_details"]?["amount"] ?? widget.subscriptiondetails["amount"] ?? widget.subscriptiondetails["package"] ?? "0"}",
                                 style: TextStyle(
                                   fontSize: size.width * 0.05,
                                   fontWeight: FontWeight.bold,
@@ -877,12 +871,34 @@ class _ChangePricesScreenState extends State<ChangePricesScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.green.shade300, width: 0.8),
+                      ),
+                      child: Text(
+                        "Incl. GST",
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.green.shade800,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 6),
                 Row(
@@ -901,25 +917,21 @@ class _ChangePricesScreenState extends State<ChangePricesScreen> {
 
                           double? totalvalue = 0;
                           try {
-                            var amount = double.parse(
+                            var amount = double.tryParse(
                               subcatDetails[subCatIndex]["services"][index]["acontroller"]
                                   .text,
-                            ).toInt();
-                            var discount = 0;
-                            try {
-                              discount = double.parse(
-                                subcatDetails[subCatIndex]["services"][index]["dcontroller"]
-                                    .text,
-                              ).toInt();
-                            } catch (err) {
-                              discount = 0;
-                            }
+                            ) ?? 0.0;
+                            var discount = double.tryParse(
+                              subcatDetails[subCatIndex]["services"][index]["dcontroller"]
+                                  .text,
+                            ) ?? 0.0;
 
                             var types =
                                 subcatDetails[subCatIndex]["services"][index]["menuselectVal"];
                             totalvalue = (types == "%"
                                 ? (amount - (amount * discount) / 100)
-                                : (amount - discount).toDouble());
+                                : (amount - discount));
+                            if (totalvalue < 0) totalvalue = 0.0;
                           } catch (err) {
                             totalvalue = 0;
                           }
@@ -942,7 +954,7 @@ class _ChangePricesScreenState extends State<ChangePricesScreen> {
                         ],
 
                         decoration: InputDecoration(
-                          hintText: "price",
+                          hintText: "Price (incl. GST)",
                           prefixText: "₹ ",
                           hintStyle: const TextStyle(
                             fontSize: 13,
@@ -1010,33 +1022,21 @@ class _ChangePricesScreenState extends State<ChangePricesScreen> {
 
                             double totalvalue = 0;
                             try {
-                              // var amount = int.parse(
-                              //   subcatDetails[subCatIndex]["services"][index]["acontroller"]
-                              //       .text,
-                              // );
-                              var amount = double.parse(
+                              var amount = double.tryParse(
                                 subcatDetails[subCatIndex]["services"][index]["acontroller"]
                                     .text,
-                              ).toInt();
-                              var discount = 0;
-                              try {
-                                discount = double.parse(
-                                  subcatDetails[subCatIndex]["services"][index]["dcontroller"]
-                                      .text,
-                                ).toInt();
-                                // discount = int.parse(
-                                //   subcatDetails[subCatIndex]["services"][index]["dcontroller"]
-                                //       .text,
-                                // );
-                              } catch (err) {
-                                discount = 0;
-                              }
+                              ) ?? 0.0;
+                              var discount = double.tryParse(
+                                subcatDetails[subCatIndex]["services"][index]["dcontroller"]
+                                    .text,
+                              ) ?? 0.0;
 
                               var types =
                                   subcatDetails[subCatIndex]["services"][index]["menuselectVal"];
                               totalvalue = (types == "%"
                                   ? (amount - (amount * discount) / 100)
-                                  : (amount - discount).toDouble());
+                                  : (amount - discount));
+                              if (totalvalue < 0) totalvalue = 0.0;
                             } catch (err) {
                               totalvalue = 0;
                             }
@@ -1072,33 +1072,21 @@ class _ChangePricesScreenState extends State<ChangePricesScreen> {
 
                             double totalvalue = 0;
                             try {
-                              // var amount = int.parse(
-                              //   subcatDetails[subCatIndex]["services"][index]["acontroller"]
-                              //       .text,
-                              // );
-                              var amount = double.parse(
+                              var amount = double.tryParse(
                                 subcatDetails[subCatIndex]["services"][index]["acontroller"]
                                     .text,
-                              ).toInt();
-                              var discount = 0;
-                              try {
-                                // discount = int.parse(
-                                //   subcatDetails[subCatIndex]["services"][index]["dcontroller"]
-                                //       .text,
-                                // );
-                                discount = double.parse(
-                                  subcatDetails[subCatIndex]["services"][index]["dcontroller"]
-                                      .text,
-                                ).toInt();
-                              } catch (err) {
-                                discount = 0;
-                              }
+                              ) ?? 0.0;
+                              var discount = double.tryParse(
+                                subcatDetails[subCatIndex]["services"][index]["dcontroller"]
+                                    .text,
+                              ) ?? 0.0;
 
                               var types =
                                   subcatDetails[subCatIndex]["services"][index]["menuselectVal"];
                               totalvalue = (types == "%"
                                   ? (amount - (amount * discount) / 100)
-                                  : (amount - discount).toDouble());
+                                  : (amount - discount));
+                              if (totalvalue < 0) totalvalue = 0.0;
                             } catch (err) {
                               totalvalue = 0;
                             }
@@ -1220,7 +1208,7 @@ class _ChangePricesScreenState extends State<ChangePricesScreen> {
                         controller: priceController,
                         keyboardType: TextInputType.number,
                         decoration: InputDecoration(
-                          labelText: "Price",
+                          labelText: "Price (incl. GST)",
                           prefixText: "₹ ",
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),

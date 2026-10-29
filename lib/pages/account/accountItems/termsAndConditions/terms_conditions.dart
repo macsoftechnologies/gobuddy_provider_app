@@ -82,10 +82,7 @@ For further details, contact us at: support@gobuddy.com
               SizedBox(height: height * 0.02),
               GradientButton(
                 onPressed: () {
-                  // Navigator.push(
-                  //   context,
-                  //   MaterialPageRoute(builder: (_) => InstructionsTwo()),
-                  // );
+                  Navigator.pop(context, true);
                 },
                 child: Text(
                   'Accept & Continue',

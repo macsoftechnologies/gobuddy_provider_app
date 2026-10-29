@@ -22,16 +22,8 @@ class _ProviderSubscriptionSummaryState
   double deviceWidth = 0;
     dynamic userData = {};
 
-  Map<String, dynamic>? receivedData;
-
-  String subscription = "";
-  String packageType = "";
-  String packageValue = "";
-  double packageAmount = 0;
-  String? categoryId;
-
-  List services = [];
-  List addons = [];
+  List<Map<String, dynamic>> selectedPlans = [];
+  bool _isDataLoaded = false;
 
   final TextEditingController couponController = TextEditingController();
 
@@ -58,35 +50,57 @@ class _ProviderSubscriptionSummaryState
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-      var userDataValue = Preferences.getUserDetails();
-  if (userDataValue != null) {
-    userData = json.decode(userDataValue);
-  }
+    var userDataValue = Preferences.getUserDetails();
+    if (userDataValue != null) {
+      userData = json.decode(userDataValue);
+    }
 
     final args =
         ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
 
-    if (args != null && receivedData == null) {
-      final data = args['all-data'];
-
-      if (data is String) {
-        receivedData = jsonDecode(data);
+    if (args != null && !_isDataLoaded) {
+      _isDataLoaded = true;
+      if (args['all_plans'] != null) {
+        final list = args['all_plans'];
+        if (list is List) {
+          selectedPlans = list.map((e) {
+            if (e is String) return jsonDecode(e) as Map<String, dynamic>;
+            return Map<String, dynamic>.from(e as Map);
+          }).toList();
+        }
+      } else if (args['all-data'] != null) {
+        final data = args['all-data'];
+        final map = data is String
+            ? jsonDecode(data) as Map<String, dynamic>
+            : Map<String, dynamic>.from(data as Map);
+        selectedPlans = [map];
       } else {
-        receivedData = Map<String, dynamic>.from(data);
+        // Fallback: single plan passed from change_prices (Renew / Upgrade flow)
+        final pAmt = args['selectedPackage']?['amount'] ??
+            args['selectedPackage']?['package_amount'] ??
+            args['package_amount'] ??
+            args['amount'] ??
+            '0';
+        final pVal = args['selectedPackage']?['jobs'] ??
+            args['selectedPackage']?['package_value'] ??
+            args['package_value'] ??
+            args['jobs'] ??
+            '0';
+        final pType = args['package_type'] ?? 'jobs';
+        final planName = args['plan']?['plan'] ?? args['subscription'] ?? 'Subscription Plan';
+
+        selectedPlans = [{
+          'category_id': args['category_id'] ?? '',
+          'category': args['category'] ?? '',
+          'subscription': planName,
+          'package_type': pType,
+          'package_value': pVal.toString(),
+          'package_amount': pAmt.toString(),
+          'services': args['services'] ?? [],
+          'addons': args['addons'] ?? [],
+          'subscription_id': args['subscription_id'],
+        }];
       }
-
-      subscription = receivedData?['subscription'] ?? '';
-      packageType = receivedData?['package_type'] ?? '';
-      packageValue = receivedData?['package_value'] ?? '';
-      categoryId = receivedData?['category_id'] ?? '';
-
-      packageAmount = double.tryParse(
-            receivedData?['package_amount'].toString() ?? '0',
-          ) ??
-          0;
-
-      services = receivedData?['services'] ?? [];
-      addons = receivedData?['addons'] ?? [];
     }
   }
 
@@ -98,9 +112,14 @@ class _ProviderSubscriptionSummaryState
   }
 
   double get totalAmount {
-    double total = packageAmount;
-    for (var addon in addons) {
-      total += double.tryParse(addon['price'].toString()) ?? 0;
+    double total = 0.0;
+    for (var plan in selectedPlans) {
+      final pAmt = double.tryParse(plan['package_amount']?.toString() ?? '0') ?? 0.0;
+      total += pAmt;
+      final addons = (plan['addons'] as List<dynamic>?) ?? [];
+      for (var addon in addons) {
+        total += double.tryParse(addon['price']?.toString() ?? '0') ?? 0.0;
+      }
     }
     return total;
   }
@@ -110,13 +129,74 @@ class _ProviderSubscriptionSummaryState
   double get toPay => (totalAmount + gstAmount - couponDiscount).clamp(0, double.infinity);
 
   void _addMorePlans() {
-    Navigator.pushNamed(context, Config.createPackageRouteName);
+    Navigator.pushNamed(
+      context,
+      Config.createPackageRouteName,
+      arguments: {
+        'existing_plans': selectedPlans,
+      },
+    );
+  }
+
+  void _confirmRemovePlan(int index) {
+    if (index < 0 || index >= selectedPlans.length) return;
+    final plan = selectedPlans[index];
+    final title = (plan['category_name'] != null && plan['category_name'].toString().isNotEmpty)
+        ? "${plan['category_name']} - ${plan['subscription']}"
+        : "${plan['subscription']}";
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("Remove Plan", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+        content: Text("Remove $title from your selected plans?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _removePlan(index);
+            },
+            child: const Text("Remove", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _removePlan(int index) {
+    if (index >= 0 && index < selectedPlans.length) {
+      setState(() {
+        selectedPlans.removeAt(index);
+        if (selectedPlans.isEmpty) {
+          couponDiscount = 0;
+          appliedCouponCode = null;
+          couponController.clear();
+          couponError = null;
+        } else if (appliedCouponCode != null) {
+          _applyCoupon();
+        }
+      });
+    }
   }
 
   Future<void> _applyCoupon() async {
     final code = couponController.text.trim();
     if (code.isEmpty) {
       setState(() => couponError = "Please enter a coupon code");
+      return;
+    }
+
+    if (totalAmount <= 0) {
+      setState(() => couponError = "Please add at least one plan before applying a coupon");
       return;
     }
 
@@ -134,6 +214,7 @@ class _ProviderSubscriptionSummaryState
       final response = await Repository.postApiService(EndPoints.coupounApi, {
         "user_id": userData['user_id'] ?? "",
         "coupon": code,
+        "price": totalAmount.toStringAsFixed(2),
       });
 
       final Map<String, dynamic> jsonResponse =
@@ -141,12 +222,12 @@ class _ProviderSubscriptionSummaryState
 
       if (jsonResponse["status"] == "valid" || jsonResponse["status"] == true) {
         double discountFromApi = 0;
-        if (jsonResponse["discount"] != null) {
-          discountFromApi = double.tryParse(jsonResponse["discount"].toString()) ?? 0;
+        if (jsonResponse["coupon_amount"] != null) {
+          discountFromApi = double.tryParse(jsonResponse["coupon_amount"].toString()) ?? 0;
         } else if (jsonResponse["saving_amount"] != null) {
           discountFromApi = double.tryParse(jsonResponse["saving_amount"].toString()) ?? 0;
-        } else if (jsonResponse["amount"] != null) {
-          discountFromApi = double.tryParse(jsonResponse["amount"].toString()) ?? 0;
+        } else if (jsonResponse["discount"] != null) {
+          discountFromApi = double.tryParse(jsonResponse["discount"].toString()) ?? 0;
         }
 
         setState(() {
@@ -168,8 +249,17 @@ class _ProviderSubscriptionSummaryState
     }
   }
 
+  void _removeCoupon() {
+    setState(() {
+      appliedCouponCode = null;
+      couponDiscount = 0;
+      couponController.clear();
+      couponError = null;
+    });
+  }
+
   // ─────────────────────────────────────────────────────
-  // Subscription confirmation API call
+  // Subscription confirmation API call (creates all selected plans)
   // ─────────────────────────────────────────────────────
   Future<void> _addProviderSubscription(String paymentId) async {
     bool internet = await UtilClass.checkInternet();
@@ -180,70 +270,84 @@ class _ProviderSubscriptionSummaryState
           context: context, message: "No Internet Connection");
       return;
     }
-    try {
-      final response = await Repository.postApiRawService(
-        EndPoints.addSubscriptionProvider,
-        {
-          "provider_id": userData['user_id'] ?? "", 
-          "category_id": categoryId ?? "",
-          "subscription": subscription,
-          "package_type": packageType,
-          "package_value": packageValue,
-          "package_amount": packageAmount,
-          "services": services,
-          "addons": addons,
-        },
-      );
 
-      print("ADD SUBSCRIPTION RAW RESPONSE: $response");
+    List<String> createdSubIds = [];
+    List<String> failedPlanErrors = [];
 
-      Map<String, dynamic> jsonResponse;
-      if (response is String) {
-        jsonResponse = json.decode(response);
-      } else {
-        jsonResponse = response as Map<String, dynamic>;
-      }
+    for (var plan in selectedPlans) {
+      try {
+        final response = await Repository.postApiRawService(
+          EndPoints.addSubscriptionProvider,
+          {
+            "provider_id": userData['user_id'] ?? "",
+            "category_id": plan['category_id'] ?? "",
+            "subscription": plan['subscription'] ?? "",
+            "package_type": plan['package_type'] ?? "",
+            "package_value": plan['package_value'] ?? "",
+            "package_amount": plan['package_amount'] ?? "",
+            "services": plan['services'] ?? [],
+            "addons": plan['addons'] ?? [],
+            "subscription_id": plan['subscription_id'] ?? "",
+            "is_upgrade": (plan['subscription_id'] != null && plan['subscription_id'].toString().isNotEmpty) ? 1 : 0,
+          },
+        );
 
-      if (!mounted) return;
+        print("ADD SUBSCRIPTION RAW RESPONSE: $response");
 
-      if (jsonResponse["status"] == true) {
-        final subSuccess = GetSubscriptionSuccessModel.fromJson(jsonResponse);
-        setState(() {
-          pushintoSubscriptionSuccess = subSuccess;
-        });
-
-        final String subId = subSuccess.subscriptionId?.toString() ?? "";
-        if (paymentId.isNotEmpty && subId.isNotEmpty) {
-          await _recordSubscriptionPayment(
-            paymentId: paymentId,
-            subscriptionId: subId,
-          );
+        Map<String, dynamic> jsonResponse;
+        if (response is String) {
+          jsonResponse = json.decode(response);
         } else {
-          _closeProcessingDialogIfOpen();
-          _showPaymentSuccessDialog();
-          if (jsonResponse['message'] != null) {
-            UtilClass.showAlertDialog(context: context, message: "${jsonResponse['message']}");
-          }
+          jsonResponse = response as Map<String, dynamic>;
         }
+
+        if (jsonResponse["status"] == true) {
+          final subSuccess = GetSubscriptionSuccessModel.fromJson(jsonResponse);
+          setState(() {
+            pushintoSubscriptionSuccess = subSuccess;
+          });
+
+          final String subId = subSuccess.subscriptionId?.toString() ?? "";
+          if (subId.isNotEmpty) {
+            createdSubIds.add(subId);
+          }
+        } else {
+          final planName = plan['category_name'] ?? plan['subscription'];
+          failedPlanErrors.add("$planName: ${jsonResponse['message'] ?? 'Failed'}");
+        }
+      } catch (e) {
+        print("_addProviderSubscription error: $e");
+        final planName = plan['category_name'] ?? plan['subscription'];
+        failedPlanErrors.add("$planName: $e");
+      }
+    }
+
+    if (!mounted) return;
+
+    if (createdSubIds.isNotEmpty) {
+      final String commaSeparatedIds = createdSubIds.join(",");
+      if (paymentId.isNotEmpty) {
+        await _recordSubscriptionPayment(
+          paymentId: paymentId,
+          subscriptionId: commaSeparatedIds,
+        );
       } else {
         _closeProcessingDialogIfOpen();
-        UtilClass.showAlertDialog(
-          context: context,
-          message: jsonResponse["message"] ?? "Subscription failed",
-        );
+        _showPaymentSuccessDialog();
       }
-    } catch (e) {
-      print("_addProviderSubscription error: $e");
+    } else {
       _closeProcessingDialogIfOpen();
-      if (!mounted) return;
       UtilClass.showAlertDialog(
-          context: context,
-          message: "Payment succeeded but confirming your subscription failed: $e");
+        context: context,
+        message: failedPlanErrors.isNotEmpty
+            ? "Subscription creation failed:\n${failedPlanErrors.join('\n')}"
+            : "Failed to confirm subscriptions. Please try again.",
+      );
     }
   }
 
   // ─────────────────────────────────────────────────────
-  // Record payment order on backend
+  // Record payment order on backend with comma-separated subscription IDs
   // ─────────────────────────────────────────────────────
   Future<void> _recordSubscriptionPayment({
     required String paymentId,
@@ -289,13 +393,25 @@ class _ProviderSubscriptionSummaryState
   }
 
   void _proceedToPay() {
-    if (services.isEmpty) {
+    if (selectedPlans.isEmpty) {
       UtilClass.showAlertDialog(
         context: context,
-        message: "No services selected for this subscription. Please go back and configure your services before paying.",
+        message: "No plans selected. Please add at least one plan to continue.",
       );
       return;
     }
+
+    for (var plan in selectedPlans) {
+      final services = (plan['services'] as List<dynamic>?) ?? [];
+      if (services.isEmpty) {
+        UtilClass.showAlertDialog(
+          context: context,
+          message: "No services selected for ${plan['category_name'] ?? plan['subscription']}. Please configure services before paying.",
+        );
+        return;
+      }
+    }
+
     if (toPay <= 0) {
       _showProcessingDialog();
       _addProviderSubscription("FREE_COUPON_APPLIED");
@@ -332,18 +448,8 @@ class _ProviderSubscriptionSummaryState
     } catch (e) {
       debugPrint("Razorpay open error: $e");
       if (!mounted) return;
-      if (Config.razorpayKey.startsWith("rzp_test_")) {
-        _showTestPaymentFallback(
-          reason: "Unable to open payment screen: $e",
-          onSimulateSuccess: () {
-            _showProcessingDialog();
-            _addProviderSubscription("TEST_SUB_${DateTime.now().millisecondsSinceEpoch}");
-          },
-        );
-      } else {
-        UtilClass.showAlertDialog(
-            context: context, message: "Unable to open payment screen: $e");
-      }
+      UtilClass.showAlertDialog(
+          context: context, message: "Unable to open payment screen: $e");
     }
   }
 
@@ -351,58 +457,8 @@ class _ProviderSubscriptionSummaryState
     debugPrint(
         "RAZORPAY PAYMENT FAILED — code: ${response.code}, message: ${response.message}");
     if (!mounted) return;
-    if (Config.razorpayKey.startsWith("rzp_test_")) {
-      _showTestPaymentFallback(
-        reason: "${response.message ?? 'Payment was cancelled or failed'}",
-        onSimulateSuccess: () {
-          _showProcessingDialog();
-          _addProviderSubscription("TEST_SUB_${DateTime.now().millisecondsSinceEpoch}");
-        },
-      );
-    } else {
-      UtilClass.showAlertDialog(
-          context: context, message: "Payment Failed please try again");
-    }
-  }
-
-  void _showTestPaymentFallback({
-    required String reason,
-    required VoidCallback onSimulateSuccess,
-  }) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: const [
-            Icon(Icons.payment, color: Colors.orange),
-            SizedBox(width: 8),
-            Text("Payment (Test Mode)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
-        ),
-        content: Text(
-          "$reason\n\nYou are in Test Mode (using test key). Would you like to simulate successful payment to complete subscription testing?",
-          style: const TextStyle(fontSize: 14, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D32),
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () {
-              Navigator.pop(ctx);
-              onSimulateSuccess();
-            },
-            child: const Text("Simulate Success"),
-          ),
-        ],
-      ),
-    );
+    UtilClass.showAlertDialog(
+        context: context, message: "Payment Failed please try again");
   }
 
   void handlePaymentSuccessResponse(PaymentSuccessResponse response) {
@@ -489,7 +545,7 @@ class _ProviderSubscriptionSummaryState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildPlansCard(),
+                      _buildPlansList(),
                       SizedBox(height: deviceHeight * 0.02),
                       _buildAddMorePlansButton(),
                       SizedBox(height: deviceHeight * 0.025),
@@ -558,94 +614,205 @@ class _ProviderSubscriptionSummaryState
   }
 
   // ─────────────────────────────────────────────────────
-  // Plans card
+  // Plans list (supports multiple plans in cart)
   // ─────────────────────────────────────────────────────
-  Widget _buildPlansCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: _cardDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            subscription,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+  Widget _buildPlansList() {
+    if (selectedPlans.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 20),
+        decoration: _cardDecoration(),
+        child: Center(
+          child: Column(
+            children: [
+              Icon(Icons.inventory_2_outlined, size: 48, color: Colors.grey.shade400),
+              const SizedBox(height: 10),
+              const Text(
+                "No subscription plans in cart",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "Tap 'Add More Plans' below to choose a category plan",
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.green.shade50,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(packageType,
-                        style: const TextStyle(fontWeight: FontWeight.w600)),
-                    Text(packageValue, style: const TextStyle(color: Colors.grey)),
-                  ],
-                ),
-                Text(
-                  "₹${packageAmount.toStringAsFixed(0)}",
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                ),
-              ],
-            ),
-          ),
-          if (services.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            const Text("Services",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            ...services.map((service) {
-              return Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.all(10),
+        ),
+      );
+    }
+
+    return Column(
+      children: List.generate(selectedPlans.length, (index) {
+        final plan = selectedPlans[index];
+        final catName = plan['category_name']?.toString() ?? "";
+        final subName = plan['subscription']?.toString() ?? "Plan";
+        final pkgType = plan['package_type']?.toString() ?? "";
+        final pkgVal = plan['package_value']?.toString() ?? "";
+        final pkgAmt = double.tryParse(plan['package_amount']?.toString() ?? '0') ?? 0.0;
+        final servicesList = (plan['services'] as List<dynamic>?) ?? [];
+        final addonsList = (plan['addons'] as List<dynamic>?) ?? [];
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(16),
+          decoration: _cardDecoration(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (catName.isNotEmpty) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE8F5E9),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              catName,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF2E7D32),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        Text(
+                          subName,
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => _confirmRemovePlan(index),
+                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 22),
+                    tooltip: "Remove Plan",
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text("Service ID : ${service['service_id']}"),
-                    const SizedBox(height: 5),
-                    Text("Price : ₹${service['price']}"),
-                    Text("Discount : ${service['discount']} (${service['type']})"),
-                  ],
-                ),
-              );
-            }).toList(),
-          ],
-          if (addons.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            const Text("Add-ons",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            ...addons.map((addon) {
-              return Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
+                  color: Colors.green.shade50,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text("Addon ID : ${addon['addon_id']}"),
-                    Text("₹${addon['price']}"),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(pkgType,
+                            style: const TextStyle(fontWeight: FontWeight.w600)),
+                        Text(pkgVal, style: const TextStyle(color: Colors.grey)),
+                      ],
+                    ),
+                    Text(
+                      "₹${pkgAmt.toStringAsFixed(0)}",
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                    ),
                   ],
                 ),
-              );
-            }).toList(),
-          ],
-        ],
-      ),
+              ),
+              if (servicesList.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(
+                  "Services (${servicesList.length})",
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                ...servicesList.map((service) {
+                  final String sName = (service['service_name'] ??
+                          service['title'] ??
+                          service['name'] ??
+                          '')
+                      .toString()
+                      .trim();
+                  final String displayServiceName = sName.isNotEmpty
+                      ? sName
+                      : "Service #${service['service_id']}";
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade200),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            displayServiceName,
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          "₹${service['price']}${service['discount'] != null && service['discount'].toString() != '0' ? ' (${service['discount']} ${service['type'] ?? ''} off)' : ''}",
+                          style: const TextStyle(fontSize: 13, color: Colors.black87),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+              if (addonsList.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  "Add-ons (${addonsList.length})",
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                ...addonsList.map((addon) {
+                  final String aName = (addon['addon_name'] ??
+                          addon['addon_service'] ??
+                          addon['title'] ??
+                          addon['name'] ??
+                          '')
+                      .toString()
+                      .trim();
+                  final String displayAddonName = aName.isNotEmpty
+                      ? aName
+                      : "Addon #${addon['addon_id']}";
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade200),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(displayAddonName, style: const TextStyle(fontSize: 13)),
+                        ),
+                        const SizedBox(width: 8),
+                        Text("₹${addon['price']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            ],
+          ),
+        );
+      }),
     );
   }
 
@@ -744,9 +911,25 @@ class _ProviderSubscriptionSummaryState
           ],
           if (appliedCouponCode != null) ...[
             const SizedBox(height: 8),
-            Text(
-              "Coupon \"$appliedCouponCode\" applied — you saved ₹${couponDiscount.toStringAsFixed(0)}",
-              style: const TextStyle(color: Color(0xFF3AAD41), fontSize: 12, fontWeight: FontWeight.w500),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    "Coupon \"$appliedCouponCode\" applied — you saved ₹${couponDiscount.toStringAsFixed(0)}",
+                    style: const TextStyle(color: Color(0xFF3AAD41), fontSize: 12, fontWeight: FontWeight.w500),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: _removeCoupon,
+                  child: const Padding(
+                    padding: EdgeInsets.only(left: 8),
+                    child: Text(
+                      "Remove",
+                      style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ],

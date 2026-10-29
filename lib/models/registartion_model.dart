@@ -15,11 +15,11 @@ class GetRegistrationModel {
 
   factory GetRegistrationModel.fromJson(Map<String, dynamic> json) {
     return GetRegistrationModel(
-      status: json['status'] as String?,
-      message: json['message'] as String?,
-      userId: json['user_id'] as int?,
-      phoneNumber: json['phone_number'] as String?,
-      viewAs: json['view_as'] as String?,
+      status: json['status']?.toString(),
+      message: json['message']?.toString(),
+      userId: json['user_id'] != null ? int.tryParse(json['user_id'].toString()) : null,
+      phoneNumber: json['phone_number']?.toString(),
+      viewAs: json['view_as']?.toString(),
     );
   }
 

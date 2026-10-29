@@ -41,6 +41,7 @@ import '../pages/ratings/customer_ratings.dart';
 import '../pages/registrationFee/registaration_fee_screen.dart';
 import '../pages/registrationFee/registration_success_screen.dart';//OTPVerificationScreen
 import 'package:gobuddy/pages/account/accountItems/mySubscription/subscription_success_screen.dart';
+import '../pages/onboardingStatus/onboarding_status_screen.dart';
 //EKYCVerificationPage
 
 class MyAppRoute extends StatefulWidget {
@@ -69,6 +70,7 @@ class MyAppRouteState extends State<MyAppRoute> {
         //OnBoardScreenOne
 
         Config.splashRouteName: (ctx) => const SplashScreen(),
+        Config.onboardingStatusRouteName: (ctx) => const OnboardingStatusScreen(),
         Config.onBoardRouteName: (ctx) => OnBoardScreenOne(),
         Config.loginRouteName: (ctx) => LoginScreen(),
         Config.registrationRouteName: (ctx) =>  SignupScreen(),
@@ -156,12 +158,17 @@ class MyAppRouteState extends State<MyAppRoute> {
 
 
         if (settings.name == Config.paymentMethodRouteName) {
-          final args = settings.arguments as Map<String, dynamic>;
+          final args = (settings.arguments is Map<String, dynamic>)
+              ? settings.arguments as Map<String, dynamic>
+              : <String, dynamic>{};
           return MaterialPageRoute(
             builder: (_) => PaymentMethodScreen(
-              amount: args["amount"] ?? 0.0,
-              fromScreen: args['fromScreen'] ?? '',
-
+              amount: (args["amount"] is num)
+                  ? (args["amount"] as num).toDouble()
+                  : double.tryParse(args["amount"]?.toString() ?? "0") ?? 0.0,
+              fromScreen: args['fromScreen']?.toString() ?? '',
+              referralCode: args['referral_code']?.toString(),
+              savingAmount: args['saving_amount']?.toString(),
             ),
           );
         }

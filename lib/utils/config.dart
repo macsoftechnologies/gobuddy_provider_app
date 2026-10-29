@@ -219,7 +219,8 @@ class Config {
 
 
 // kk changes
-static const ekycRouteName='ekyc verification screen';//DashboardPage
+  static const onboardingStatusRouteName = 'Onboarding Status Screen';
+  static const ekycRouteName='ekyc verification screen';//DashboardPage
   static const dashboardcRouteName='dashboards screen'; //RegistrationSuccessPage
   static const regiSuccessRouteName='Registration Success Page'; //RegistrationFeeScreen
   static const regiFeeRouteName='Registration Fee Screen'; //PaymentMethodScreen
@@ -255,5 +256,6 @@ static const ekycRouteName='ekyc verification screen';//DashboardPage
    static const getActiveSubscriptionsRouteName = 'active_subscription_screen_Route';
 
    // Razorpay
-   static const String razorpayKey = "rzp_test_B54BlMynixkzHI";
+  //  static const String razorpayKey = "rzp_live_ZdGjJKZdukGGzL";
+  static const String razorpayKey = "rzp_test_B54BlMynixkzHI";
 }

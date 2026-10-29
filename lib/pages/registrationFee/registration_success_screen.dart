@@ -17,7 +17,7 @@ class RegistrationSuccessPage extends StatelessWidget {
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         Navigator.of(context).pushNamedAndRemoveUntil(
-          Config.loginRouteName,
+          Config.dashboardcRouteName,
           (route) => false,
         );
       },
@@ -112,7 +112,7 @@ class RegistrationSuccessPage extends StatelessWidget {
                       child: ElevatedButton(
                         onPressed: () {
                           Navigator.of(context).pushNamedAndRemoveUntil(
-                            Config.loginRouteName,
+                            Config.dashboardcRouteName,
                             (route) => false,
                           );
                         },

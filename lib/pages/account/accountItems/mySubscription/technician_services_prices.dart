@@ -948,12 +948,34 @@ class _TechnicianServicesPricesState extends State<TechnicianServicesPrices> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.green.shade300, width: 0.8),
+                      ),
+                      child: Text(
+                        "Incl. GST",
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.green.shade800,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 6),
                 Row(
@@ -1013,7 +1035,7 @@ class _TechnicianServicesPricesState extends State<TechnicianServicesPrices> {
                         ],
 
                         decoration: InputDecoration(
-                          hintText: "price",
+                          hintText: "Price (incl. GST)",
                           prefixText: "₹ ",
                           hintStyle: const TextStyle(
                             fontSize: 13,

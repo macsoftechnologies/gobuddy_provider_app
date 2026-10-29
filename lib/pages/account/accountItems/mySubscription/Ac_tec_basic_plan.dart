@@ -51,6 +51,7 @@ class _AcTechnicianScreenState extends State<AcTechnicianScreen> {
 
   GetAddonsModel? pushintoAddonsModel;
   List<Addon> getaddons = [];
+  List<dynamic> existingPlans = [];
 
   // ── Service input controllers (keyed by service.id to persist across subcategories) ──
   final Map<String, TextEditingController> priceControllers = {};
@@ -90,6 +91,7 @@ class _AcTechnicianScreenState extends State<AcTechnicianScreen> {
       planName      = args['plan_name'];
       planPrice     = args['plan_price'];
       planPackages  = (args['plan_packages'] as List<PlanDataOne>?) ?? [];
+      existingPlans = (args['existing_plans'] as List<dynamic>?) ?? [];
     }
     _getSubCategories();
     _getMyAddons();
@@ -258,6 +260,7 @@ class _AcTechnicianScreenState extends State<AcTechnicianScreen> {
       if (price > 0) {
         servicesPayload.add({
           "service_id": int.tryParse(service.id?.toString() ?? sId) ?? (service.id ?? sId),           
+          "service_name": service.title ?? "",
           "price":      price,
           "discount":   discount,
           "type":       discountTypes[sId] ?? "percentage",
@@ -279,6 +282,7 @@ class _AcTechnicianScreenState extends State<AcTechnicianScreen> {
       final price = double.tryParse(addonPriceControllers[idx]?.text ?? "") ?? 0;
       addonsPayload.add({
         "addon_id": getaddons[idx].id,               // ✅ Addon.id
+        "addon_name": getaddons[idx].addonService ?? "",
         "price":    price,
       });
     }
@@ -290,8 +294,9 @@ class _AcTechnicianScreenState extends State<AcTechnicianScreen> {
 
     // ── Final payload ─────────────────────────────────
     final payload = {
-      "provider_id":   userData["user_id"]??"",                          // fill from SharedPreferences
+      "provider_id":   userData["user_id"] ?? "",
       "category_id":    categoryId,
+      "category_name":  categoryName ?? "",
       "subscription":   planName,                    // e.g. "Silver Plan"
       "package_type":   selectedPkg?.packageType  ?? "",  // ✅ PlanDataOne.packageType
       "package_value":  selectedPkg?.packageValue ?? "",  // ✅ PlanDataOne.packageValue
@@ -302,15 +307,38 @@ class _AcTechnicianScreenState extends State<AcTechnicianScreen> {
       "addons":         addonsPayload,
     };
 
-    print("FINAL PAYLOAD: ${json.encode(payload)}");
+    List<Map<String, dynamic>> allPlans = [];
+    if (existingPlans.isNotEmpty) {
+      for (var p in existingPlans) {
+        if (p is Map<String, dynamic>) {
+          allPlans.add(Map<String, dynamic>.from(p));
+        } else if (p is String) {
+          allPlans.add(Map<String, dynamic>.from(json.decode(p)));
+        } else if (p is Map) {
+          allPlans.add(Map<String, dynamic>.from(p));
+        }
+      }
+    }
 
+    int existingCatIndex = allPlans.indexWhere(
+      (p) => p['category_id']?.toString() == categoryId?.toString(),
+    );
+    if (existingCatIndex != -1) {
+      allPlans[existingCatIndex] = payload;
+    } else {
+      allPlans.add(payload);
+    }
 
+    print("ALL PLANS TO SUMMARY: ${json.encode(allPlans)}");
 
-    Navigator.pushNamed(context, 
-    arguments: {
-      'all-data' : json.encode(payload)
-    },
-   Config.getSummaryScreenRouteName);
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      Config.getSummaryScreenRouteName,
+      (route) => route.settings.name == Config.dashboardcRouteName || route.isFirst,
+      arguments: {
+        'all_plans': allPlans,
+      },
+    );
 
     // TODO: call your submit API with payload then navigate
   }
@@ -358,11 +386,39 @@ class _AcTechnicianScreenState extends State<AcTechnicianScreen> {
                           child: CircularProgressIndicator(
                               color: Color(0xFF3AAD41)))
                     else if (getservices.isNotEmpty) ...[
-                      const Text(
-                        "Enter your service price and discount",
-                        style: TextStyle(
-                            fontWeight: FontWeight.w500,
-                            color: Colors.black54),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "Enter your service price and discount",
+                            style: TextStyle(
+                                fontWeight: FontWeight.w500,
+                                color: Colors.black54),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade50,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.green.shade300, width: 0.8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.info_outline, size: 12, color: Colors.green.shade700),
+                                const SizedBox(width: 4),
+                                Text(
+                                  "Prices include GST",
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.green.shade800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                       SizedBox(height: deviceHeight * 0.01),
                       _buildServiceCards(),
@@ -661,10 +717,32 @@ class _AcTechnicianScreenState extends State<AcTechnicianScreen> {
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ✅ Services.title
-                        Text(service.title ?? "",
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600, fontSize: 14)),
+                        // ✅ Services.title with Incl. GST tag
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(service.title ?? "",
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600, fontSize: 14)),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.green.shade300, width: 0.8),
+                              ),
+                              child: Text(
+                                "Incl. GST",
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.green.shade800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                         const SizedBox(height: 6),
 
                         Row(children: [
@@ -673,7 +751,7 @@ class _AcTechnicianScreenState extends State<AcTechnicianScreen> {
                               controller: priceControllers[service.id ?? index.toString()],
                               onChanged: (_) => setCardState(() {}),
                               decoration: InputDecoration(
-                                hintText: "Price",
+                                hintText: "Price (incl. GST)",
                                 prefixText: "₹ ",
                                 hintStyle: const TextStyle(
                                     fontSize: 13, color: Colors.grey),
@@ -823,17 +901,40 @@ class _AcTechnicianScreenState extends State<AcTechnicianScreen> {
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ✅ Addon.addonService  (the name field)
-                        Text(addon.addonService ?? "",
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14)),
+                        // ✅ Addon.addonService with Incl. GST tag
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(addon.addonService ?? "",
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14)),
+                            ),
+                            if (isSelected)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.green.shade300, width: 0.8),
+                                ),
+                                child: Text(
+                                  "Incl. GST",
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.green.shade800,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                         if (isSelected) ...[
                           const SizedBox(height: 6),
                           TextField(
                             controller: addonPriceControllers[index],
                             decoration: InputDecoration(
-                              hintText: "Enter price",
+                              hintText: "Enter price (incl. GST)",
                               prefixText: "₹ ",
                               hintStyle: const TextStyle(
                                   fontSize: 13, color: Colors.grey),

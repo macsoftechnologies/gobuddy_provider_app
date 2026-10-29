@@ -98,39 +98,50 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
     
   }
   void callgetPlansAPI(sub) async {
+    this.subscription = (sub is Map) ? Map<String, dynamic>.from(sub) : sub;
     var internet = await UtilClass.checkInternet();
     if (internet) {
       // ignore: use_build_context_synchronously
       UtilClass.showProgress(context: context);
+      final status = sub["status_text"]?.toString() ??
+          ((sub["status"] == 1 || sub["status"] == "1") ? "Active" : "Inactive");
+      final bool isSubActive = status.toLowerCase() == "active";
+
       await Repository.postApiService(EndPoints.packagesApi, {
         "subscription_id": sub["subscription_id"],
+        "action": isSubActive ? "upgrade" : "renew",
       }).then((value) async {
         UtilClass.hideProgress();
         dynamic parsed = {};
         try {
-          parsed =value;
+          parsed = (value is String) ? json.decode(value) : value;
           if (parsed["status"] == "valid") {
-            packages = parsed["plans"];
+            final List plansList = (parsed["plans"] is List) ? parsed["plans"] : [];
+            if (plansList.isEmpty) {
+              // ignore: use_build_context_synchronously
+              UtilClass.showAlertDialog(
+                context: context,
+                message: "No packages available for this subscription at this time.",
+              );
+              return;
+            }
 
             setState(() {
-              selectedPack = parsed["plans"][0];
+              packages = plansList;
+              selectedPack = plansList[0];
             });
 
-            setState(() {
-              packages = parsed["plans"];
-            });
-
-            _showJobPackageBottomSheet({});
+            _showJobPackageBottomSheet(plansList);
           } else {
             // ignore: use_build_context_synchronously
             UtilClass.showAlertDialog(
               // ignore: use_build_context_synchronously
               context: context,
-              message: parsed["message"],
+              message: parsed["message"] ?? "Failed to fetch packages",
             );
           }
         } catch (e) {
-          print(e);
+          print("Error in callgetPlansAPI: $e");
         }
         print(parsed["message"]);
       });
@@ -159,22 +170,23 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
         UtilClass.hideProgress();
         dynamic parsed = {};
         try {
-          parsed = value;
+          parsed = (value is String) ? json.decode(value) : value;
           if (parsed["status"] == "valid") {
-            subscriptions = parsed["data"];
+            subscriptions = parsed["data"] ?? [];
 
             setState(() {
-              subscriptions = parsed["data"];
+              subscriptions = parsed["data"] ?? [];
+              if (subscriptions.isNotEmpty) {
+                subscription = subscriptions[selectedIndex.clamp(0, subscriptions.length - 1)];
+              } else {
+                subscription = null;
+              }
             });
-
-             subscription = subscriptions[selectedIndex];
           } else {
-            // ignore: use_build_context_synchronously
-            UtilClass.showAlertDialog(
-              // ignore: use_build_context_synchronously
-              context: context,
-              message: parsed["message"],
-            );
+            setState(() {
+              subscriptions = [];
+              subscription = null;
+            });
           }
         } catch (e) {
           print(e);
@@ -271,30 +283,57 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
               ),
               SizedBox(height: size.height * 0.02),
 
-              // Tabs
-              SizedBox(
-                height: 50, // Adjust the height as needed
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: subscriptions.asMap().entries.map((entry) {
-                      int index = entry.key;
-                      dynamic item = entry.value;
-                      return _buildTab(
-                        item["category"],
-                        index,
-                        item["category"],
-                        size,
-                      );
-                    }).toList(),
+              // Tabs & Content
+              if (subscriptions.isNotEmpty) ...[
+                SizedBox(
+                  height: 50, // Adjust the height as needed
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: subscriptions.asMap().entries.map((entry) {
+                        int index = entry.key;
+                        dynamic item = entry.value;
+                        return _buildTab(
+                          item["category"] ?? "",
+                          index,
+                          item["category"] ?? "",
+                          size,
+                        );
+                      }).toList(),
+                    ),
                   ),
                 ),
-              ),
-
-              SizedBox(height: size.height * 0.02),
-
-              // Subscription Card
-             subscription != null ? _buildSubscriptionCard(subscription, size): SizedBox(),
+                SizedBox(height: size.height * 0.02),
+                // Subscription Card
+                subscription != null
+                    ? _buildSubscriptionCard(subscription, size)
+                    : const SizedBox(),
+              ] else
+                Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.inventory_2_outlined,
+                            size: 54, color: Colors.grey.shade400),
+                        const SizedBox(height: 12),
+                        const Text(
+                          "No active subscriptions found",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black54,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          "Create a new package to activate your services",
+                          style: TextStyle(fontSize: 13, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -340,6 +379,8 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
             ? "Active"
             : "Inactive");
     final isActive = status.toLowerCase() == "active";
+    final packageType = subscription["package_type"]?.toString().toLowerCase().trim() ?? '';
+    final isTimeBased = packageType == 'time' || packageType == 'months' || packageType == 'month' || packageType == 'duration';
 
     return Container(
       width: double.infinity,
@@ -394,7 +435,7 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
                   ),
                   SizedBox(height: size.height * 0.01),
                   Text(
-                    "₹ ${subscription["package"] ?? subscription["amount"] ?? "0"}",
+                    "₹ ${subscription["package_amount"] ?? subscription["package_details"]?["amount"] ?? subscription["amount"] ?? subscription["package"] ?? "0"}",
                     style: TextStyle(
                       fontSize: size.width * 0.05,
                       fontWeight: FontWeight.bold,
@@ -411,15 +452,17 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               _buildJobInfo(
-                "Total Jobs",
-                (subscription["jobs"] ?? subscription["package_value"] ?? "0").toString(),
+                isTimeBased ? "Total Months" : "Total Jobs",
+                isTimeBased 
+                    ? (subscription["package_value"] ?? subscription["package_details"]?["value"] ?? subscription["package"] ?? "0").toString().replaceAll(RegExp(r'[^0-9]'), '')
+                    : (subscription["jobs"] ?? subscription["package_value"] ?? subscription["package_details"]?["value"] ?? "0").toString(),
                 size,
               ),
-              _buildJobInfo("Used", (subscription["used"] ?? 0).toString(), size),
+              _buildJobInfo(isTimeBased ? "Used (Jobs)" : "Used", (subscription["used"] ?? 0).toString(), size),
               _buildJobInfo("Missed", (subscription["missed"] ?? 0).toString(), size),
               _buildJobInfo(
                 "Remaining",
-                (subscription["remaining"] ?? 0).toString(),
+                isTimeBased ? "Unlimited" : (subscription["remaining"] ?? 0).toString(),
                 size,
               ),
             ],
@@ -531,9 +574,21 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
       print("Selected Package ID: ${selectedPackage['id']}");
       print("Selected Package Jobs: ${selectedPackage['jobs']}");
       print("Selected Package: $selectedPackage");
+      if (subscription == null) {
+        subscription = <String, dynamic>{};
+      } else if (subscription is! Map) {
+        subscription = Map<String, dynamic>.from(subscription);
+      }
       subscription["selectedPackage"] = selectedPackage;
       subscription["isPackage"] = true;
-      subscription["plan"] = packages[selectedPackage["selectedIndex"]];
+      subscription["is_upgrade"] = 1;
+      if (subscription["subscription_id"] == null && this.subscription != null) {
+        subscription["subscription_id"] = this.subscription["subscription_id"];
+      }
+      final int selIdx = (selectedPackage["selectedIndex"] is int)
+          ? (selectedPackage["selectedIndex"] as int).clamp(0, packages.length - 1)
+          : 0;
+      subscription["plan"] = (packages.isNotEmpty) ? packages[selIdx] : {};
        Navigator.pushNamed(
                       // ignore: use_build_context_synchronously
                       context,
@@ -707,15 +762,7 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
                       // ignore: use_build_context_synchronously
                       context,
                       Config.createPackageRouteName,
-                    ).then((_) {
-                      if (mounted) {
-                        Navigator.pushReplacementNamed(
-                          context,
-                          Config.mySubscriptionsRouteName,
-                          arguments: {'issubscription': true},
-                        );
-                      }
-                    });
+                    );
                   },
                 ),
               ),

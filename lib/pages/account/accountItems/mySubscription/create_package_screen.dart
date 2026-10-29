@@ -23,8 +23,19 @@ class _CreatePackageScreenState extends State<CreatePackageScreen> {
   GetAllCategoriesModel? pushintoallCategoriesModel;
   List<Category> allCategories = [];
   bool isLoading = false;
+  List<dynamic> existingPlans = [];
 
   dynamic userData = {};
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final args =
+        ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    if (args != null && args['existing_plans'] != null) {
+      existingPlans = (args['existing_plans'] as List<dynamic>?) ?? [];
+    }
+  }
 
   @override
   void initState() {
@@ -239,6 +250,7 @@ class _CreatePackageScreenState extends State<CreatePackageScreen> {
                                   "category_name": category.category ?? "",
                                   "category_id": category.id ?? "",
                                   "category_image": category.image ?? "",
+                                  "existing_plans": existingPlans,
                                 },
                                 Config.getSubscriptionplasnRouteName,
                               );
@@ -355,6 +367,26 @@ class _CreatePackageScreenState extends State<CreatePackageScreen> {
                     color: Colors.black87,
                   ),
                 ),
+                if (existingPlans.any((p) =>
+                    (p is Map ? p['category_id']?.toString() : null) ==
+                    category.id?.toString()))
+                  Container(
+                    margin: const EdgeInsets.only(top: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F5E9),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFF81C784), width: 0.8),
+                    ),
+                    child: const Text(
+                      "In Cart",
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF2E7D32),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
                 if ((category.subCategories ?? []).isNotEmpty)
                   Text(
                     "${category.subCategories!.length} Sub-services",

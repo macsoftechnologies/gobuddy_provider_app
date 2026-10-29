@@ -13,6 +13,8 @@ class EndPoints {
       "${newbaseUrl}onetimeregistration";
   static const String getOneTimeRegistrationFee =
       "${newbaseUrl}getonetimeregistrationfee";
+  static const String getReferralDetails =
+      "${newbaseUrl}getreferraldetails";
   static const String newlogin = "${newbaseUrl}newlogin";
   static const String profile = "${newbaseUrl}profile";
     static const String dashboard = "${newbaseUrl}dashboard";
@@ -20,6 +22,7 @@ class EndPoints {
  static const String getOderAlert = "${newbaseUrl}getProviderRecentOrders";
     
   static const String updateProfile = "${newbaseUrl}update_profile";
+  static const String inactiveUser = "${newbaseUrl}inactiveuser";
   static const String tools = "${newbaseUrl}requesttools";
   static const String addrequesttool = "${newbaseUrl}addrequesttool";
   static const String getMyQrCode = "${newbaseUrl}get_qrcode_image";
@@ -27,7 +30,7 @@ class EndPoints {
   static const String catsubCat =
       "${newbaseUrl}categorybasedsubcategoryservices";
   static const String catAddons = "${newbaseUrl}categorybasedaddons";
-  static const String upgradeSub = "${newbaseUrl}upgrade_subscription";
+  static const String upgradeSub = "${newbaseUrl}upgrade_provider_subscription";
 
   static const String servicesApi = "${newbaseUrl}services";
   static const String uploadQrCode = "${newbaseUrl}upload_qrcode_image";
@@ -52,6 +55,7 @@ class EndPoints {
        static const String orderDetails = "${newbaseUrl}viewOrderDetails";
        static const String addImages = "${newbaseUrl}add_provider_gallery";
        static const String submitDetails = "${newbaseUrl}orderchargessubmitted";
+       static const String updateCharges = "${newbaseUrl}update_order_charges";
        static const String verifyCode = "${newbaseUrl}verify_code";
        static const String cancelOrders = "${newbaseUrl}providercancelorder";
       static const String orderaccept = "${newbaseUrl}orderaccept";

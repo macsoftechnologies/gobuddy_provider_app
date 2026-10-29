@@ -44,8 +44,8 @@ class _SummaryScreenState extends State<SummaryScreen> {
         UtilClass.hideProgress();
         dynamic parsed = await json.decode(value);
         try {
-          if (parsed["status"] == "valid") {
-            var amount = parsed["coupon_amount"];
+          if (parsed["status"] == "valid" || parsed["status"] == true) {
+            var amount = (parsed["coupon_amount"] ?? parsed["discount"] ?? parsed["saving_amount"] ?? "0").toString();
             setState(() {
               _isCouponApplied = true;
               _appliedCouponAmount = amount;
@@ -93,22 +93,19 @@ class _SummaryScreenState extends State<SummaryScreen> {
         try {
           parsed = value;
           if (parsed["status"] == "valid") {
-            plans = parsed["data"];
+            plans = parsed["data"] ?? [];
             setState(() {
-              plans = parsed["data"];
+              plans = parsed["data"] ?? [];
             });
 
-            var data = parsed["data"][0];
-
-            print(data);
-            
+            if (plans.isNotEmpty) {
+              var data = plans[0];
+              print(data);
+            }
           } else {
-            // ignore: use_build_context_synchronously
-            UtilClass.showAlertDialog(
-              // ignore: use_build_context_synchronously
-              context: context,
-              message: parsed["message"],
-            );
+            setState(() {
+              plans = [];
+            });
           }
         } catch (e) {
           print(e);
@@ -190,8 +187,13 @@ class _SummaryScreenState extends State<SummaryScreen> {
   String get totalPrice {
     double total = 0.0;
     for (var plan in plans) {
-      var package = double.parse(plan["package"]);
+      var package = double.tryParse(plan["package"]?.toString() ?? "0") ?? 0.0;
       total += package;
+      if (plan["addons"] is List) {
+        for (var addon in plan["addons"]) {
+          total += double.tryParse(addon["price"]?.toString() ?? "0") ?? 0.0;
+        }
+      }
     }
     return total.toString();
   }
@@ -262,74 +264,16 @@ class _SummaryScreenState extends State<SummaryScreen> {
       razorpay.open(options);
     } catch (e) {
       debugPrint("Razorpay open error: $e");
-      if (Config.razorpayKey.startsWith("rzp_test_")) {
-        _showTestPaymentFallback(
-          reason: "Unable to open Razorpay gateway: $e",
-          onSimulateSuccess: () {
-            callpaymentVeifyAPI("TEST_PAY_${DateTime.now().millisecondsSinceEpoch}");
-          },
-        );
-      } else {
-        showAlertDialog(context, "Payment Error", "Unable to open payment screen: $e");
-      }
+      showAlertDialog(context, "Payment Error", "Unable to open payment screen: $e");
     }
   }
 
   void handlePaymentErrorResponse(PaymentFailureResponse response) {
     debugPrint("Razorpay error: code ${response.code}, msg: ${response.message}");
-    if (Config.razorpayKey.startsWith("rzp_test_")) {
-      _showTestPaymentFallback(
-        reason: "${response.message ?? 'Payment was cancelled or failed'}",
-        onSimulateSuccess: () {
-          callpaymentVeifyAPI("TEST_PAY_${DateTime.now().millisecondsSinceEpoch}");
-        },
-      );
-    } else {
-      showAlertDialog(
-        context,
-        "Payment Failed",
-        "${response.message ?? 'Payment failed. Please try again.'}",
-      );
-    }
-  }
-
-  void _showTestPaymentFallback({
-    required String reason,
-    required VoidCallback onSimulateSuccess,
-  }) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: const [
-            Icon(Icons.payment, color: Colors.orange),
-            SizedBox(width: 8),
-            Text("Payment (Test Mode)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
-        ),
-        content: Text(
-          "$reason\n\nYou are running in Test Mode (using test key). Would you like to simulate successful payment to complete subscription testing?",
-          style: const TextStyle(fontSize: 14, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D32),
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () {
-              Navigator.pop(ctx);
-              onSimulateSuccess();
-            },
-            child: const Text("Simulate Success"),
-          ),
-        ],
-      ),
+    showAlertDialog(
+      context,
+      "Payment Failed",
+      "${response.message ?? 'Payment failed. Please try again.'}",
     );
   }
 

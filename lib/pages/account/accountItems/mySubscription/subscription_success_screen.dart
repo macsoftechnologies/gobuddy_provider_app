@@ -18,7 +18,7 @@ class SubscriptionSuccessPage extends StatelessWidget {
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         Navigator.of(context).pushNamedAndRemoveUntil(
-          Config.loginRouteName,
+          Config.dashboardcRouteName,
           (route) => false,
         );
       },
@@ -113,7 +113,7 @@ class SubscriptionSuccessPage extends StatelessWidget {
                       child: ElevatedButton(
                         onPressed: () {
                           Navigator.of(context).pushNamedAndRemoveUntil(
-                            Config.loginRouteName,
+                            Config.dashboardcRouteName,
                             (route) => false,
                           );
                         },

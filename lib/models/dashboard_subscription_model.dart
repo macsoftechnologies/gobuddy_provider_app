@@ -33,6 +33,7 @@ class Data {
   final String? subscription;
   final String? jobs;
   final String? package;
+  final String? packageType;
   final int? used;
   final int? missed;
   final int? remaining;
@@ -53,6 +54,7 @@ class Data {
     this.subscription,
     this.jobs,
     this.package,
+    this.packageType,
     this.used,
     this.missed,
     this.remaining,
@@ -69,22 +71,23 @@ class Data {
 
   factory Data.fromJson(Map<String, dynamic> json) {
     return Data(
-      subscriptionId: json['subscription_id'],
-      providerId: json['provider_id'],
-      categoryId: json['category_id'],
-      subscription: json['subscription'],
-      jobs: json['jobs'],
-      package: json['package'],
-      used: json['used'],
-      missed: json['missed'],
-      remaining: json['remaining'],
-      paymentId: json['payment_id'],
-      subscribedon: json['subscribedon'],
-      amount: json['amount'],
-      savingAmount: json['saving_amount'],
-      coupon: json['coupon'],
-      category: json['category'],
-      statusText: json['status_text'],
+      subscriptionId: json['subscription_id']?.toString(),
+      providerId: json['provider_id']?.toString(),
+      categoryId: json['category_id']?.toString(),
+      subscription: json['subscription']?.toString(),
+      jobs: (json['jobs'] ?? json['package_value'] ?? json['package_details']?['value'])?.toString(),
+      package: (json['package'] ?? json['package_name'] ?? json['package_details']?['package_name'])?.toString(),
+      packageType: json['package_type']?.toString(),
+      used: json['used'] is int ? json['used'] : int.tryParse(json['used']?.toString() ?? '0') ?? 0,
+      missed: json['missed'] is int ? json['missed'] : int.tryParse(json['missed']?.toString() ?? '0') ?? 0,
+      remaining: json['remaining'] is int ? json['remaining'] : int.tryParse(json['remaining']?.toString() ?? '0') ?? 0,
+      paymentId: json['payment_id']?.toString(),
+      subscribedon: json['subscribedon']?.toString(),
+      amount: (json['package_amount'] ?? json['package_details']?['amount'] ?? json['amount'] ?? json['package'])?.toString(),
+      savingAmount: json['saving_amount']?.toString(),
+      coupon: json['coupon']?.toString(),
+      category: json['category']?.toString(),
+      statusText: json['status_text']?.toString() ?? ((json['status'] == 1 || json['status'] == '1') ? 'Active' : 'Inactive'),
       services: json['services'] != null
           ? List<Services>.from(
               json['services'].map((x) => Services.fromJson(x)))
@@ -119,6 +122,7 @@ class Services {
   final String? subscriptionServiceId;
   final String? subCategoryId;
   final String? serviceId;
+  final String? serviceName;
   final String? price;
   final String? discount;
   final String? type;
@@ -135,6 +139,7 @@ class Services {
     this.subscriptionServiceId,
     this.subCategoryId,
     this.serviceId,
+    this.serviceName,
     this.price,
     this.discount,
     this.type,
@@ -153,6 +158,7 @@ class Services {
       subscriptionServiceId: json['subscription_service_id'],
       subCategoryId: json['sub_category_id'],
       serviceId: json['service_id'],
+      serviceName: (json['service_name'] ?? json['service_title'] ?? json['title'])?.toString(),
       price: json['price'],
       discount: json['discount'],
       type: json['type'],
@@ -171,6 +177,7 @@ class Services {
         'subscription_service_id': subscriptionServiceId,
         'sub_category_id': subCategoryId,
         'service_id': serviceId,
+        'service_name': serviceName,
         'price': price,
         'discount': discount,
         'type': type,

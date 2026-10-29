@@ -82,12 +82,12 @@ bool _isInit = false;
 
       setState(() {
         // Assign lists properly
-        getoders = pushintoModel!.jobs!.orders ?? [];
+        getoders = _consolidateCalendarOrders(pushintoModel!.jobs!.orders ?? []);
         getcalendar = pushintoModel!.jobs!.calendar ?? [];
 
         final List<Vacations> combinedVacations = List.from(pushintoModel!.jobs!.vacations ?? []);
         for (var c in (pushintoModel!.jobs!.calendar ?? [])) {
-          if (c.date != null) {
+          if (c.date != null && c.status?.toLowerCase() == 'vacation') {
             final alreadyIn = combinedVacations.any((v) => v.date == c.date);
             if (!alreadyIn) {
               combinedVacations.add(
@@ -607,6 +607,7 @@ Widget buildVacationCard(Vacations v) {
           'date': vacation.date!,
           'start_time': startTimeStr,
           'end_time': endTimeStr,
+          'status': 'vacation',
         },
       );
 
@@ -744,6 +745,87 @@ Widget buildVacationCard(Vacations v) {
   }
 
   // ======== WIDGET TREE ========
+  List<Orders> _consolidateCalendarOrders(List<Orders> rawList) {
+    if (rawList.isEmpty) return rawList;
+    final Map<String, List<Orders>> groups = {};
+    final List<String> groupKeys = [];
+
+    for (var o in rawList) {
+      final calId = (o.jobCalenderId ?? "").trim();
+      final id = (o.id ?? "").trim();
+      final date = (o.scheduleDate ?? "").trim();
+      final time = (o.scheduleTime ?? "").trim();
+
+      String key = "";
+      if (calId.isNotEmpty && calId != "0" && calId != "null") {
+        key = "cal_$calId";
+      } else if (id.isNotEmpty && id != "0") {
+        key = "id_${id}_${date}_$time";
+      } else {
+        key = "idx_${groupKeys.length}";
+      }
+
+      if (!groups.containsKey(key)) {
+        groups[key] = [];
+        groupKeys.add(key);
+      }
+      groups[key]!.add(o);
+    }
+
+    final List<Orders> consolidated = [];
+    for (var key in groupKeys) {
+      final list = groups[key]!;
+      if (list.length == 1) {
+        consolidated.add(list.first);
+      } else {
+        final first = list.first;
+        final names = <String>[];
+        double totalPrice = 0.0;
+        for (var item in list) {
+          final sName = (item.serviceName ?? "").trim();
+          if (sName.isNotEmpty && !names.contains(sName)) {
+            names.add(sName);
+          }
+          final p = double.tryParse((item.price ?? '0').replaceAll('₹', '').replaceAll(',', '').trim()) ?? 0.0;
+          totalPrice += p;
+        }
+
+        String combinedName = "";
+        if (names.length == 2) {
+          combinedName = "${names[0]} & ${names[1]}";
+        } else if (names.length > 2) {
+          combinedName = "${names[0]} (+${names.length - 1} more)";
+        } else if (names.length == 1) {
+          combinedName = names[0];
+        } else {
+          combinedName = first.serviceName ?? "Service";
+        }
+
+        final merged = Orders(
+          id: first.id,
+          userId: first.userId,
+          jobCalenderId: first.jobCalenderId,
+          providerId: first.providerId,
+          serviceId: first.serviceId,
+          scheduleDate: first.scheduleDate,
+          scheduleTime: first.scheduleTime,
+          price: totalPrice > 0 ? totalPrice.toStringAsFixed(2) : first.price,
+          quantity: first.quantity,
+          status: first.status,
+          createdAt: first.createdAt,
+          userName: first.userName,
+          serviceName: combinedName,
+          location: first.location,
+          latitude: first.latitude,
+          longitude: first.longitude,
+          landmark: first.landmark,
+        );
+        consolidated.add(merged);
+      }
+    }
+    return consolidated;
+  }
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(

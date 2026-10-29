@@ -22,6 +22,7 @@ class _PlanSelectionScreenState extends State<PlanSelectionScreen> {
   String? categoryName;
   dynamic categoryId;
   String? categoryImage;
+  List<dynamic> existingPlans = [];
 
   /// Group plans by plan_id → Basic Plan, Advanced Plan as separate cards
   List<Map<String, dynamic>> get groupedPlans {
@@ -84,6 +85,7 @@ class _PlanSelectionScreenState extends State<PlanSelectionScreen> {
       categoryName = args['category_name'];
       categoryId = args['category_id'];
       categoryImage = args['category_image'];
+      existingPlans = (args['existing_plans'] as List<dynamic>?) ?? [];
 
       print("Category Name is $categoryName");
       print("Category ID is $categoryId");
@@ -346,6 +348,7 @@ class _PlanSelectionScreenState extends State<PlanSelectionScreen> {
                             "plan_name": selectedPlanName,  
                             "plan_price": selectedPlanPrice, 
                            "plan_packages": groupedPlans[selectedIndex!]["packages"], 
+                            "existing_plans": existingPlans,
                           },
                         );
                       }

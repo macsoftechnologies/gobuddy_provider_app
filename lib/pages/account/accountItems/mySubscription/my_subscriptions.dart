@@ -92,19 +92,15 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
         try {
           parsed = await json.decode(value);
           if (parsed["status"] == "valid") {
-            subscriptionsDetails = parsed["data"];
-
+            subscriptionsDetails = parsed["data"] ?? [];
 
             setState(() {
-              subscriptionsDetails = parsed["data"];
+              subscriptionsDetails = parsed["data"] ?? [];
             });
           } else {
-            // ignore: use_build_context_synchronously
-            UtilClass.showAlertDialog(
-              // ignore: use_build_context_synchronously
-              context: context,
-              message: parsed["message"],
-            );
+            setState(() {
+              subscriptionsDetails = [];
+            });
           }
         } catch (e) {
           print(e);
@@ -224,6 +220,8 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
   Widget _buildSubscriptionCard(Map subscription, Size size) {
     final status = subscription["status"];
     final isActive = status == "Active";
+    final packageType = subscription["package_type"]?.toString().toLowerCase().trim() ?? '';
+    final isTimeBased = packageType == 'time' || packageType == 'months' || packageType == 'month' || packageType == 'duration';
 
     return Container(
       width: double.infinity,
@@ -287,11 +285,17 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               _buildJobInfo(
-                  "Total Jobs", subscription["totalJobs"].toString(), size),
-              _buildJobInfo("Used", subscription["used"].toString(), size),
-              _buildJobInfo("Missed", subscription["missed"].toString(), size),
+                  isTimeBased ? "Total Months" : "Total Jobs", 
+                  isTimeBased 
+                      ? (subscription["package_value"] ?? subscription["plan"] ?? "0").toString().replaceAll(RegExp(r'[^0-9]'), '')
+                      : (subscription["totalJobs"] ?? "0").toString(), 
+                  size),
+              _buildJobInfo(isTimeBased ? "Used (Jobs)" : "Used", (subscription["used"] ?? 0).toString(), size),
+              _buildJobInfo("Missed", (subscription["missed"] ?? 0).toString(), size),
               _buildJobInfo(
-                  "Remaining", subscription["remaining"].toString(), size),
+                  "Remaining", 
+                  isTimeBased ? "Unlimited" : (subscription["remaining"] ?? 0).toString(), 
+                  size),
             ],
           ),
           Divider(height: size.height * 0.03, thickness: 1),

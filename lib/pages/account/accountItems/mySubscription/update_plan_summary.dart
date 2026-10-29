@@ -75,36 +75,33 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
   }
 
   String get totalPrice {
-    double total = double.parse(
-      widget.subscription["selectedPackage"]["amount"],
-    );
-
+    final selectedPkg = widget.subscription["selectedPackage"];
+    final amt = selectedPkg?["amount"] ?? selectedPkg?["package_amount"] ?? "0";
+    double total = double.tryParse(amt.toString()) ?? 0.0;
     return total.toString();
   }
 
   String get exttotalPrice {
-    double total = double.parse(widget.subscription["package"]);
-
+    final curAmt = widget.subscription["package_amount"] ??
+        widget.subscription["package_details"]?["amount"] ??
+        widget.subscription["amount"] ??
+        widget.subscription["package"] ??
+        "0";
+    double total = double.tryParse(curAmt.toString()) ?? 0.0;
     return total.toString();
   }
 
   double get gstAmount {
-    double selected = double.tryParse(widget.subscription["selectedPackage"]?["amount"]?.toString() ?? "0") ?? 0.0;
-    double current = double.tryParse(widget.subscription["package"]?.toString() ?? "0") ?? 0.0;
+    double selected = double.tryParse(totalPrice) ?? 0.0;
+    double current = double.tryParse(exttotalPrice) ?? 0.0;
     double diff = selected - current;
     if (diff <= 0) return 0.0;
     return diff * 0.18;
   }
 
   String get finalPrice {
-    double selected = double.tryParse(
-      widget.subscription["selectedPackage"]?["amount"]?.toString() ?? "0",
-    ) ?? 0.0;
-
-    double current = double.tryParse(
-      widget.subscription["package"]?.toString() ?? "0",
-    ) ?? 0.0;
-
+    double selected = double.tryParse(totalPrice) ?? 0.0;
+    double current = double.tryParse(exttotalPrice) ?? 0.0;
     double coupon = double.tryParse(_appliedCouponAmount) ?? 0.0;
 
     double diff = selected - current;
@@ -202,74 +199,16 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
       razorpay.open(options);
     } catch (e) {
       debugPrint("Razorpay open error: $e");
-      if (Config.razorpayKey.startsWith("rzp_test_")) {
-        _showTestPaymentFallback(
-          reason: "Unable to open Razorpay gateway: $e",
-          onSimulateSuccess: () {
-            callpaymentVeifyAPI("TEST_UPGRADE_${DateTime.now().millisecondsSinceEpoch}");
-          },
-        );
-      } else {
-        showAlertDialog(context, "Payment Error", "Unable to open payment screen: $e");
-      }
+      showAlertDialog(context, "Payment Error", "Unable to open payment screen: $e");
     }
   }
 
   void handlePaymentErrorResponse(PaymentFailureResponse response) {
     debugPrint("Razorpay error: code ${response.code}, msg: ${response.message}");
-    if (Config.razorpayKey.startsWith("rzp_test_")) {
-      _showTestPaymentFallback(
-        reason: "${response.message ?? 'Payment was cancelled or failed'}",
-        onSimulateSuccess: () {
-          callpaymentVeifyAPI("TEST_UPGRADE_${DateTime.now().millisecondsSinceEpoch}");
-        },
-      );
-    } else {
-      showAlertDialog(
-        context,
-        "Payment Failed",
-        "${response.message ?? 'Payment failed. Please try again.'}",
-      );
-    }
-  }
-
-  void _showTestPaymentFallback({
-    required String reason,
-    required VoidCallback onSimulateSuccess,
-  }) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: const [
-            Icon(Icons.payment, color: Colors.orange),
-            SizedBox(width: 8),
-            Text("Payment (Test Mode)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
-        ),
-        content: Text(
-          "$reason\n\nYou are in Test Mode (using test key). Would you like to simulate successful payment to complete upgrade testing?",
-          style: const TextStyle(fontSize: 14, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D32),
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () {
-              Navigator.pop(ctx);
-              onSimulateSuccess();
-            },
-            child: const Text("Simulate Success"),
-          ),
-        ],
-      ),
+    showAlertDialog(
+      context,
+      "Payment Failed",
+      "${response.message ?? 'Payment failed. Please try again.'}",
     );
   }
 
@@ -316,61 +255,97 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
 
   void callpaymentVeifyAPI(String paymentid) async {
     var internet = await UtilClass.checkInternet();
-    print(widget.subscription);
+    debugPrint("Upgrading subscription details: ${widget.subscription}");
 
-    if (internet) {
-
-      var input  = {
-      
-        'payment_id':paymentid,
-        "subscription_id": widget.subscription["subscription_id"],
-        "subscription": widget.subscription["plan"]['plan'],
-        "jobs": widget.subscription["selectedPackage"]['jobs'],
-        "package": widget.subscription["selectedPackage"]['amount'],
-        "amount": finalPrice,
-      };
-      // ignore: use_build_context_synchronously
-      UtilClass.showProgress(context: context);
-      await Repository.postApiService(EndPoints.upgradeSub, input).then((value) async {
-        UtilClass.hideProgress();
-        dynamic parsed = {};
-        try {
-          parsed = await json.decode(value);
-          if (parsed["status"] == "valid") {
-            showDialog(
-              context: context,
-              builder: (context) {
-                Future.delayed(const Duration(seconds: 3), () {
-                  Navigator.of(context).pop(); // close the dialog first
-                  Navigator.of(context).pushNamedAndRemoveUntil(
-                    Config.getActiveSubscriptionsRouteName,
-                    (route) => false,
-                  );
-                });
-
-                return const ReferralDialog(
-                  title: "Payment Successful",
-                  subtitle: "Thank You for upgrading the subscription.",
-                  image: "assets/images/greentick.png",
-                );
-              },
-            );
-          } else {
-            // ignore: use_build_context_synchronously
-            UtilClass.showAlertDialog(
-              // ignore: use_build_context_synchronously
-              context: context,
-              message: parsed["message"],
-            );
-          }
-        } catch (e) {
-          print(e);
-        }
-        print(parsed["message"]);
-      });
-    } else {
-      // ignore: use_build_context_synchronously
+    if (!internet) {
       UtilClass.showAlertDialog(context: context, message: Config.kNoInternet);
+      return;
+    }
+
+    // ignore: use_build_context_synchronously
+    UtilClass.showProgress(context: context);
+
+    try {
+      // 1. Record payment transaction in provider_subscription_payment
+      try {
+        await Repository.postApiService(EndPoints.subPayment, {
+          "user_id": userData["user_id"] ?? "",
+          "coupon": _couponController.text,
+          "amount": finalPrice,
+          "saving_amount": _appliedCouponAmount,
+          "payment_id": paymentid,
+          "subscription_ids": widget.subscription["subscription_id"]?.toString() ?? "",
+        });
+      } catch (e) {
+        debugPrint("Error recording payment in subPayment: $e");
+      }
+
+      // 2. Call upgrade_provider_subscription via raw JSON
+      final selectedPkg = widget.subscription["selectedPackage"] ?? {};
+      final packageVal = selectedPkg["jobs"] ?? selectedPkg["package_value"] ?? selectedPkg["value"] ?? 0;
+      final packageAmt = selectedPkg["amount"] ?? selectedPkg["package_amount"] ?? 0;
+
+      final input = {
+        "payment_id": paymentid,
+        "subscription_id": widget.subscription["subscription_id"],
+        "subscription": widget.subscription["plan"]?['plan'] ?? widget.subscription["subscription"] ?? "",
+        "jobs": packageVal,
+        "package": packageVal,
+        "package_amount": packageAmt,
+        "amount": finalPrice,
+        "services": widget.subscription["services"] ?? [],
+        "addons": widget.subscription["addons"] ?? [],
+      };
+
+      final value = await Repository.postApiRawService(EndPoints.upgradeSub, input);
+      UtilClass.hideProgress();
+
+      dynamic parsed = value;
+      if (value is String) {
+        try {
+          parsed = json.decode(value);
+        } catch (_) {}
+      }
+
+      if (parsed != null && (parsed["status"] == "valid" || parsed["status"] == true || parsed["status"] == 1)) {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) {
+            Future.delayed(const Duration(seconds: 3), () {
+              if (mounted) {
+                Navigator.of(context).pop(); // close the dialog first
+                Navigator.of(context).pushNamedAndRemoveUntil(
+                  Config.getActiveSubscriptionsRouteName,
+                  (route) => false,
+                );
+              }
+            });
+
+            return const ReferralDialog(
+              title: "Payment Successful",
+              subtitle: "Thank You for upgrading the subscription.",
+              image: "assets/images/greentick.png",
+            );
+          },
+        );
+      } else {
+        if (!mounted) return;
+        UtilClass.showAlertDialog(
+          context: context,
+          message: parsed is Map ? (parsed["message"] ?? "Failed to upgrade subscription") : "Failed to upgrade subscription",
+        );
+      }
+    } catch (e) {
+      UtilClass.hideProgress();
+      debugPrint("Upgrade API error: $e");
+      if (mounted) {
+        UtilClass.showAlertDialog(
+          context: context,
+          message: "Something went wrong while processing the upgrade.",
+        );
+      }
     }
   }
 
@@ -729,6 +704,27 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
                                 ),
                               ],
                             ),
+                            if (gstAmount > 0)
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    "GST (18%)",
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w400,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                  Text(
+                                    "+ ₹${gstAmount.toStringAsFixed(2)}",
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             const Divider(),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
