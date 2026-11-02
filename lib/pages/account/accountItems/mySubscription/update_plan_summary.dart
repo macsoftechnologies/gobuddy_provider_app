@@ -12,9 +12,6 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../../../../components/custom_back_button.dart';
 import '../../../paymentGateway/payment_screen.dart';
 
-// import '../../utilites/custombackbutton.dart';
-// import '../payment_screen.dart';
-
 class UpdateSummaryScreen extends StatefulWidget {
   final String title;
   final String oldPlan;
@@ -57,8 +54,6 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
     razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, handlePaymentErrorResponse);
     razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, handlePaymentSuccessResponse);
     razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, handleExternalWalletSelected);
-    // final data = json.decode(subscriptionJson);
-    // subscriptions = data["subscriptions"];
 
     var userDataValue = Preferences.getUserDetails();
     if (userDataValue != null) {
@@ -74,6 +69,17 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
     }
   }
 
+  bool get _isRenewal {
+    final rawStatus =
+        (widget.subscription["status_text"] ?? "").toString().toLowerCase().trim();
+    final rem = int.tryParse((widget.subscription["remaining"] ?? "").toString());
+    final statusVal = widget.subscription["status"]?.toString();
+    return rawStatus == "completed" ||
+        rawStatus == "expired" ||
+        statusVal == "0" ||
+        (rem != null && rem <= 0);
+  }
+
   String get totalPrice {
     final selectedPkg = widget.subscription["selectedPackage"];
     final amt = selectedPkg?["amount"] ?? selectedPkg?["package_amount"] ?? "0";
@@ -82,6 +88,7 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
   }
 
   String get exttotalPrice {
+    if (_isRenewal) return "0.0";
     final curAmt = widget.subscription["package_amount"] ??
         widget.subscription["package_details"]?["amount"] ??
         widget.subscription["amount"] ??
@@ -94,7 +101,8 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
   double get gstAmount {
     double selected = double.tryParse(totalPrice) ?? 0.0;
     double current = double.tryParse(exttotalPrice) ?? 0.0;
-    double diff = selected - current;
+    double diff = _isRenewal ? selected : (selected - current);
+    if (diff <= 0) diff = selected;
     if (diff <= 0) return 0.0;
     return diff * 0.18;
   }
@@ -104,7 +112,10 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
     double current = double.tryParse(exttotalPrice) ?? 0.0;
     double coupon = double.tryParse(_appliedCouponAmount) ?? 0.0;
 
-    double diff = selected - current;
+    double diff = _isRenewal ? selected : (selected - current);
+    if (diff <= 0) {
+      diff = selected;
+    }
     if (diff <= 0) {
       return "0";
     }
@@ -160,10 +171,6 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
     }
   }
 
-  /////////
-  ///////
-  ///
-  ///
   @override
   void dispose() {
     razorpay.clear();
@@ -213,18 +220,6 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
   }
 
   void handlePaymentSuccessResponse(PaymentSuccessResponse response) {
-    /*
-    * Payment Success Response contains three values:
-    * 1. Order ID
-    * 2. Payment ID
-    * 3. Signature
-    * */
-    // showAlertDialog(
-    //   context,
-    //   "Payment Successful",
-    //   "Payment ID: ${response.paymentId}",
-    // );
-
     callpaymentVeifyAPI(response.paymentId!);
   }
 
@@ -237,14 +232,7 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
   }
 
   void showAlertDialog(BuildContext context, String title, String message) {
-    // set up the buttons
-    Widget continueButton = ElevatedButton(
-      child: const Text("Continue"),
-      onPressed: () {},
-    );
-    // set up the AlertDialog
     AlertDialog alert = AlertDialog(title: Text(title), content: Text(message));
-    // show the dialog
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -282,13 +270,15 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
 
       // 2. Call upgrade_provider_subscription via raw JSON
       final selectedPkg = widget.subscription["selectedPackage"] ?? {};
-      final packageVal = selectedPkg["jobs"] ?? selectedPkg["package_value"] ?? selectedPkg["value"] ?? 0;
+      final packageVal =
+          selectedPkg["jobs"] ?? selectedPkg["package_value"] ?? selectedPkg["value"] ?? 0;
       final packageAmt = selectedPkg["amount"] ?? selectedPkg["package_amount"] ?? 0;
 
       final input = {
         "payment_id": paymentid,
         "subscription_id": widget.subscription["subscription_id"],
-        "subscription": widget.subscription["plan"]?['plan'] ?? widget.subscription["subscription"] ?? "",
+        "subscription":
+            widget.subscription["plan"]?['plan'] ?? widget.subscription["subscription"] ?? "",
         "jobs": packageVal,
         "package": packageVal,
         "package_amount": packageAmt,
@@ -307,25 +297,33 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
         } catch (_) {}
       }
 
-      if (parsed != null && (parsed["status"] == "valid" || parsed["status"] == true || parsed["status"] == 1)) {
+      if (parsed != null &&
+          (parsed["status"] == "valid" ||
+              parsed["status"] == true ||
+              parsed["status"] == 1)) {
         if (!mounted) return;
+        final screenNav = Navigator.of(context);
         showDialog(
           context: context,
           barrierDismissible: false,
-          builder: (context) {
-            Future.delayed(const Duration(seconds: 3), () {
-              if (mounted) {
-                Navigator.of(context).pop(); // close the dialog first
-                Navigator.of(context).pushNamedAndRemoveUntil(
-                  Config.getActiveSubscriptionsRouteName,
-                  (route) => false,
+          builder: (dialogContext) {
+            Future.delayed(const Duration(seconds: 2), () {
+              if (Navigator.of(dialogContext).canPop()) {
+                Navigator.of(dialogContext).pop(); // close the dialog first
+              }
+              if (screenNav.canPop()) {
+                screenNav.pop(true); // return to MySubscriptionsScreen & trigger refresh
+              } else {
+                screenNav.pushReplacementNamed(
+                  Config.mySubscriptionsRouteName,
+                  arguments: {'issubscription': true},
                 );
               }
             });
 
             return const ReferralDialog(
               title: "Payment Successful",
-              subtitle: "Thank You for upgrading the subscription.",
+              subtitle: "Thank You for renewing/upgrading the subscription.",
               image: "assets/images/greentick.png",
             );
           },
@@ -334,7 +332,9 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
         if (!mounted) return;
         UtilClass.showAlertDialog(
           context: context,
-          message: parsed is Map ? (parsed["message"] ?? "Failed to upgrade subscription") : "Failed to upgrade subscription",
+          message: parsed is Map
+              ? (parsed["message"] ?? "Failed to upgrade subscription")
+              : "Failed to upgrade subscription",
         );
       }
     } catch (e) {
@@ -349,25 +349,40 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
     }
   }
 
-  ///
-  ///
-  ///
-  ///
-  ///
-  ///
-  ///
-  ///
-  ///
-
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final double width = size.width;
     final double height = size.height;
 
-    int total = widget.newPrice;
-    int discount = isCouponApplied ? widget.discount : 0;
-    int toPay = total - discount;
+    final String oldJobsStr = (widget.subscription["jobs"] ??
+            widget.subscription["package_value"] ??
+            widget.subscription["package_details"]?["value"] ??
+            "0")
+        .toString();
+    final int oldPriceInt = (double.tryParse((widget.subscription["package_amount"] ??
+                    widget.subscription["package"] ??
+                    widget.subscription["amount"] ??
+                    widget.subscription["package_details"]?["amount"] ??
+                    "0")
+                .toString()) ??
+            0.0)
+        .toInt();
+
+    final String newPlanName = (widget.subscription["plan"]?["plan"] ??
+            widget.subscription["subscription"] ??
+            "")
+        .toString();
+    final String newJobsStr = (widget.subscription["selectedPackage"]?["jobs"] ??
+            widget.subscription["selectedPackage"]?["package_value"] ??
+            oldJobsStr)
+        .toString();
+    final int newPriceInt = (double.tryParse((widget.subscription["selectedPackage"]?["amount"] ??
+                    widget.subscription["selectedPackage"]?["package_amount"] ??
+                    "0")
+                .toString()) ??
+            0.0)
+        .toInt();
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -413,7 +428,7 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
                           ),
                           SizedBox(width: width * 0.02),
                           Text(
-                            "Update Plan",
+                            _isRenewal ? "Renew Plan" : "Update Plan",
                             style: TextStyle(
                               fontSize: width * 0.045,
                               fontWeight: FontWeight.w600,
@@ -446,15 +461,8 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   _buildPlanText(
-                                    widget.subscription["category"] +
-                                        "\n" +
-                                        widget.subscription["subscription"] +
-                                        " (" +
-                                        widget.subscription["jobs"] +
-                                        ")",
-                                    double.parse(
-                                      widget.subscription["package"],
-                                    ).toInt(),
+                                    "${widget.subscription["category"] ?? ""}\n${widget.subscription["subscription"] ?? ""} ($oldJobsStr Jobs)",
+                                    oldPriceInt,
                                     width,
                                     isOld: true,
                                   ),
@@ -465,18 +473,8 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
                                   ),
                                   SizedBox(height: height * 0.01),
                                   _buildPlanText(
-                                    widget.subscription["category"] +
-                                        "\n" +
-                                        widget.subscription["plan"]["plan"] +
-                                        " (" +
-                                        widget
-                                            .subscription["selectedPackage"]["jobs"] +
-                                        ")",
-
-                                    double.parse(
-                                      widget
-                                          .subscription["selectedPackage"]["amount"],
-                                    ).toInt(),
+                                    "${widget.subscription["category"] ?? ""}\n$newPlanName ($newJobsStr Jobs)",
+                                    newPriceInt,
                                     width,
                                   ),
                                 ],
@@ -489,7 +487,6 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
                       SizedBox(height: height * 0.02),
 
                       /// ---------- OFFERS ----------
-                      // Coupon Section
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
@@ -552,7 +549,7 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
                                         )
                                       : ActionChip(
                                           label: Text(_couponController.text),
-                                          avatar: Icon(Icons.delete),
+                                          avatar: const Icon(Icons.delete),
                                           onPressed: () {
                                             _couponController.text = "";
                                             _appliedCouponAmount = "0";
@@ -576,9 +573,7 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
                                           ? Colors.green
                                           : null,
                                       border: Border.all(
-                                        color: _isCouponApplied
-                                            ? Colors.green
-                                            : Colors.green,
+                                        color: Colors.green,
                                       ),
                                       borderRadius: BorderRadius.circular(10),
                                     ),
@@ -623,8 +618,6 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
                       SizedBox(height: height * 0.02),
 
                       /// ---------- PRICE SUMMARY ----------
-                      // _buildPriceSection(total, discount, toPay, width, height),
-                      // To Pay Section
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(
@@ -664,26 +657,27 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
                                 ),
                               ],
                             ),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Text(
-                                  "Existing plan",
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w400,
-                                    color: Colors.grey,
+                            if (!_isRenewal)
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    "Existing plan",
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w400,
+                                      color: Colors.grey,
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  "₹$exttotalPrice",
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
+                                  Text(
+                                    "₹$exttotalPrice",
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
+                                ],
+                              ),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
@@ -783,10 +777,6 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
                           GestureDetector(
                             onTap: () {
                               callRagerPayment();
-                              // Navigator.push(
-                              //   context,
-                              //   MaterialPageRoute(builder: (context) => PaymentMethodScreen(amount: 0.00, fromScreen: 'subscription',)),
-                              // );
                             },
                             child: Container(
                               height: 50,
@@ -818,81 +808,6 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
                 ),
               ),
             ),
-
-            /// ---------- BOTTOM BAR ----------
-            // Container(
-            //   padding: EdgeInsets.symmetric(
-            //     horizontal: width * 0.05,
-            //     vertical: height * 0.015,
-            //   ),
-            //   decoration: BoxDecoration(
-            //     color: Colors.white,
-            //     boxShadow: [
-            //       BoxShadow(
-            //         color: Colors.black.withOpacity(0.08),
-            //         blurRadius: 6,
-            //         offset: const Offset(0, -2),
-            //       ),
-            //     ],
-            //   ),
-            //   child: Row(
-            //     mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            //     children: [
-            //       Column(
-            //         crossAxisAlignment: CrossAxisAlignment.start,
-            //         children: [
-            //           Text(
-            //             "₹ $toPay",
-            //             style: TextStyle(
-            //               fontSize: width * 0.055,
-            //               fontWeight: FontWeight.bold,
-            //               color: Colors.black87,
-            //             ),
-            //           ),
-            //           Text(
-            //             "To be paid now",
-            //             style: TextStyle(
-            //               fontSize: width * 0.035,
-            //               color: Colors.grey,
-            //             ),
-            //           ),
-            //         ],
-            //       ),
-            //       ElevatedButton(
-            //         style: ElevatedButton.styleFrom(
-            //           backgroundColor: Colors.green,
-            //           padding: EdgeInsets.symmetric(
-            //             horizontal: width * 0.1,
-            //             vertical: height * 0.018,
-            //           ),
-            //           shape: RoundedRectangleBorder(
-            //             borderRadius: BorderRadius.circular(8),
-            //           ),
-            //         ),
-            //         onPressed: () {
-            //           // Handle payment
-            //           Navigator.push(
-            //             context,
-            //             MaterialPageRoute(
-            //               builder: (context) => PaymentMethodScreen(
-            //                 amount: toPay.toDouble(),
-            //                 fromScreen: '',
-            //               ),
-            //             ),
-            //           );
-            //         },
-            //         child: Text(
-            //           "Proceed to Pay",
-            //           style: TextStyle(
-            //             fontSize: width * 0.045,
-            //             fontWeight: FontWeight.w600,
-            //             color: Colors.white,
-            //           ),
-            //         ),
-            //       ),
-            //     ],
-            //   ),
-            // ),
           ],
         ),
       ),
@@ -926,168 +841,6 @@ class _UpdateSummaryScreenState extends State<UpdateSummaryScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildOfferSection(double width, double height) {
-    return Container(
-      padding: EdgeInsets.all(width * 0.04),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.local_offer, color: Colors.green, size: width * 0.06),
-              SizedBox(width: width * 0.02),
-              Text(
-                "Offers",
-                style: TextStyle(
-                  fontSize: width * 0.045,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade700,
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: height * 0.01),
-          Text(
-            "Enter coupon code and save on this Packages",
-            style: TextStyle(fontSize: width * 0.04, color: Colors.black87),
-          ),
-          SizedBox(height: height * 0.01),
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: width * 0.03,
-                    vertical: height * 0.015,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(6),
-                    color: Colors.grey.shade200,
-                  ),
-                  child: Text(
-                    widget.couponCode,
-                    style: TextStyle(
-                      fontSize: width * 0.04,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(width: width * 0.03),
-              if (isCouponApplied)
-                Text(
-                  "✔ Applied",
-                  style: TextStyle(
-                    color: Colors.green,
-                    fontSize: width * 0.04,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPriceSection(
-    int total,
-    int discount,
-    int toPay,
-    double width,
-    double height,
-  ) {
-    return Container(
-      padding: EdgeInsets.all(width * 0.04),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.receipt_long, color: Colors.green, size: width * 0.06),
-              SizedBox(width: width * 0.02),
-              Text(
-                "To pay  ₹ $total",
-                style: TextStyle(
-                  fontSize: width * 0.045,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87,
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: height * 0.015),
-          Divider(thickness: 1, color: Colors.grey.shade300),
-          _buildPriceRow("Total", "₹ $total", width),
-          _buildPriceRow(
-            "Discount on coupon",
-            "- ₹ $discount",
-            width,
-            isDiscount: true,
-          ),
-          Divider(thickness: 1, color: Colors.grey.shade300),
-          _buildPriceRow("To Pay", "₹ $toPay", width, isBold: true),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPriceRow(
-    String label,
-    String value,
-    double width, {
-    bool isDiscount = false,
-    bool isBold = false,
-  }) {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: width * 0.04,
-              fontWeight: isBold ? FontWeight.w600 : FontWeight.w400,
-              color: isBold ? Colors.black87 : Colors.grey.shade700,
-            ),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: width * 0.045,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
-              color: isDiscount ? Colors.green : Colors.black87,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

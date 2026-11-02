@@ -74,7 +74,12 @@ class _ViewProfilePageState extends State<ViewProfilePage> {
   }
 
   Future<void> _pickImage(ImageSource source) async {
-    final pickedFile = await ImagePicker().pickImage(source: source);
+    final pickedFile = await ImagePicker().pickImage(
+      source: source,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 80,
+    );
     if (pickedFile != null) {
       setState(() {
         _profileImage = File(pickedFile.path);

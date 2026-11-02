@@ -51,7 +51,7 @@ class SplashScreenState extends State<SplashScreen> {
 
       // 1. Fast cache check
       final ekycLocal = (decoded["ekyc"] ?? "").toString().trim();
-      final feeLocal = (decoded["registration_fee"] ?? decoded["registration_fee_status"] ?? decoded["status"] ?? "").toString().trim();
+      final feeLocal = (decoded["registration_fee"] ?? decoded["registration_fee_status"] ?? "").toString().trim();
       final adminLocal = (decoded["admin_approval_provider"] ?? "").toString().toLowerCase().trim();
 
       bool hasDocs = ekycLocal.isNotEmpty && ekycLocal != "0";
@@ -123,7 +123,7 @@ class SplashScreenState extends State<SplashScreen> {
                 hasDocs = true;
                 decoded["ekyc"] = "1";
               }
-              if (subCount > 0 || p["registration_fee"] == "1" || p["registration_fee_status"] == "1" || userDbStatus == "1") {
+              if (subCount > 0 || p["registration_fee"] == "1" || p["registration_fee_status"] == "1") {
                 isFeePaid = true;
                 decoded["registration_fee"] = "1";
                 decoded["registration_fee_status"] = "1";

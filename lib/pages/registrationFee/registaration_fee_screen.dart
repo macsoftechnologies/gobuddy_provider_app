@@ -23,6 +23,7 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
   double regFee = 300.0;
   double referralSaving = 100.0;
   bool isReferralApplied = false;
+  bool _isProcessing = false;
 
   late Razorpay _razorpay;
 
@@ -42,6 +43,9 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
     if (userDataValue != null) {
       try {
         userData = json.decode(userDataValue);
+
+        
+
         final savedRef = (userData["referral_code"] ?? "").toString().trim();
         if (savedRef.isNotEmpty && _referralController.text.isEmpty) {
           _referralController.text = savedRef;
@@ -209,12 +213,22 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
       _razorpay.open(options);
     } catch (e) {
       debugPrint("Razorpay open error: $e");
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+      }
       showAlertDialog(context, "Payment Error", "Unable to open payment screen: $e");
     }
   }
 
   void handlePaymentErrorResponse(PaymentFailureResponse response) {
     debugPrint("Razorpay failure: code ${response.code}, msg: ${response.message}");
+    if (mounted) {
+      setState(() {
+        _isProcessing = false;
+      });
+    }
     showAlertDialog(
       context,
       "Payment Failed",
@@ -245,83 +259,171 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
   }
 
   void callpaymentVeifyAPI(String paymentid) async {
-    final userId = userData["user_id"]?.toString() ?? "";
+    String userId = userData["user_id"]?.toString() ?? "";
     if (userId.isEmpty) {
-      UtilClass.showAlertDialog(
-        context: context,
-        message: "User session expired or invalid. Please re-login.",
-      );
+      userId = userData["id"]?.toString() ?? "";
+    }
+    if (userId.isEmpty) {
+      userId = Preferences.getUserID() ?? "";
+    }
+
+    if (userId.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+        UtilClass.showAlertDialog(
+          context: context,
+          message: "User session expired or invalid. Please re-login.",
+        );
+      }
       return;
     }
     var internet = await UtilClass.checkInternet();
-    if (internet) {
-      // ignore: use_build_context_synchronously
+    if (!internet) {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+        UtilClass.showAlertDialog(
+          context: context,
+          message: Config.kNoInternet,
+        );
+      }
+      return;
+    }
+
+    if (mounted) {
       UtilClass.showProgress(context: context);
-      double payableAmount = isReferralApplied && (regFee - referralSaving > 0)
-          ? (regFee - referralSaving)
-          : regFee;
-      await Repository.postApiService(EndPoints.onetimeregistrationApi, {
+    }
+    double payableAmount = isReferralApplied && (regFee - referralSaving > 0)
+        ? (regFee - referralSaving)
+        : regFee;
+
+    try {
+      final value = await Repository.postApiService(EndPoints.onetimeregistrationApi, {
         "user_id": userId,
         "amount": payableAmount.toStringAsFixed(0),
         "referral_code": _referralController.text.trim(),
         "saving_amount": isReferralApplied ? referralSaving.toStringAsFixed(0) : "0",
         "payment_id": paymentid,
-      }).then((value) async {
-        UtilClass.hideProgress();
-        dynamic parsed = {};
-        try {
-          parsed = value is String ? json.decode(value) : value;
-          if (parsed is Map && (parsed["status"] == "valid" || parsed["status"] == true || parsed["status"] == "success")) {
-            try {
-              final userMap = Map<String, dynamic>.from(userData);
-              userMap['registration_fee'] = '1';
-              userMap['registration_fee_status'] = '1';
-              userMap['status'] = '1';
-              Preferences.setUserDetails(json.encode(userMap));
-            } catch (_) {}
+      });
 
-            showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (dialogCtx) {
-                Future.delayed(const Duration(seconds: 2), () {
+      UtilClass.hideProgress();
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+      }
+
+      dynamic parsed = {};
+      try {
+        parsed = value is String ? json.decode(value) : value;
+        if (parsed is Map &&
+            (parsed["status"] == "valid" ||
+                parsed["status"] == true ||
+                parsed["status"] == "success")) {
+          try {
+            final userMap = Map<String, dynamic>.from(userData);
+            userMap['registration_fee'] = '1';
+            userMap['registration_fee_status'] = '1';
+            userMap['status'] = '1';
+            Preferences.setUserDetails(json.encode(userMap));
+          } catch (_) {}
+
+          if (!mounted) return;
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (dialogCtx) {
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) {
                   Navigator.of(context).pushNamedAndRemoveUntil(
                     Config.regiSuccessRouteName,
                     (route) => false,
                   );
-                });
+                }
+              });
 
-                return const ReferralDialog(
-                  title: "Payment Successful",
-                  subtitle: "Thank you for completing your registration fee payment.",
-                  image: "assets/images/greentick.png",
-                );
-              },
-            );
-          } else {
-            // ignore: use_build_context_synchronously
-            UtilClass.showAlertDialog(
-              // ignore: use_build_context_synchronously
-              context: context,
-              message: (parsed is Map && parsed["message"] != null)
-                  ? parsed["message"].toString()
-                  : "Registration fee payment failed.",
-            );
-          }
-        } catch (e) {
-          print(e);
+              return Dialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Image.asset(
+                        "assets/images/greentick.png",
+                        height: 60,
+                        fit: BoxFit.contain,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        "Payment Successful",
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.grey),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        "Thank you for completing your registration fee payment.",
+                        style: TextStyle(fontSize: 18, color: Colors.black, fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4CAF50),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          onPressed: () {
+                            Navigator.of(context).pushNamedAndRemoveUntil(
+                              Config.regiSuccessRouteName,
+                              (route) => false,
+                            );
+                          },
+                          child: const Text(
+                            "Continue",
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        } else {
           UtilClass.showAlertDialog(
             context: context,
-            message: "Error processing payment response: $e",
+            message: (parsed is Map && parsed["message"] != null)
+                ? parsed["message"].toString()
+                : "Registration fee payment failed.",
           );
         }
-        if (parsed is Map && parsed["message"] != null) {
-          print(parsed["message"]);
-        }
-      });
-    } else {
-      // ignore: use_build_context_synchronously
-      UtilClass.showAlertDialog(context: context, message: Config.kNoInternet);
+      } catch (e) {
+        print(e);
+        UtilClass.showAlertDialog(
+          context: context,
+          message: "Something went wrong verifying payment.",
+        );
+      }
+    } catch (e) {
+      UtilClass.hideProgress();
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+        UtilClass.showAlertDialog(
+          context: context,
+          message: "Network error during verification. Please contact support.",
+        );
+      }
     }
   }
 
@@ -647,22 +749,14 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
 
                   // Continue button
                   GestureDetector(
-                    onTap: () {
-                      Future.delayed(const Duration(seconds: 1), () {
-                        callRagerPayment();
-                        //  Navigator.of(context).pop(); // Close the dialog
-                        // Navigator.of(context).pushReplacementNamed(
-                        //   Config.regiSuccessRouteName,);
-                        //  Navigator.pushNamed(
-                        //    context,
-                        //    Config.paymentMethodRouteName,
-                        //    arguments: {
-                        //      "amount": 200.0,
-                        //      "fromScreen": "reg_fee",
-                        //    },
-                        //  );
-                      });
-                    },
+                    onTap: _isProcessing
+                        ? null
+                        : () {
+                            setState(() {
+                              _isProcessing = true;
+                            });
+                            callRagerPayment();
+                          },
                     child: Container(
                       width: 55,
                       height: 55,
@@ -670,11 +764,22 @@ class _RegistrationFeeScreenState extends State<RegistrationFeeScreen> {
                         color: Colors.white,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
-                        Icons.arrow_forward_ios,
-                        color: Color(0xFF4CAF50),
-                        size: 20,
-                      ),
+                      child: _isProcessing
+                          ? const Center(
+                              child: SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Color(0xFF4CAF50),
+                                ),
+                              ),
+                            )
+                          : const Icon(
+                              Icons.arrow_forward_ios,
+                              color: Color(0xFF4CAF50),
+                              size: 20,
+                            ),
                     ),
                   ),
 

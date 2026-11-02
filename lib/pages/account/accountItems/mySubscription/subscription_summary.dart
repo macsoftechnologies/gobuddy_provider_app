@@ -116,10 +116,10 @@ class _ProviderSubscriptionSummaryState
     for (var plan in selectedPlans) {
       final pAmt = double.tryParse(plan['package_amount']?.toString() ?? '0') ?? 0.0;
       total += pAmt;
-      final addons = (plan['addons'] as List<dynamic>?) ?? [];
-      for (var addon in addons) {
-        total += double.tryParse(addon['price']?.toString() ?? '0') ?? 0.0;
-      }
+      // Add-on prices are customer rates, not subscription plan cost
+      //
+      //
+      //
     }
     return total;
   }

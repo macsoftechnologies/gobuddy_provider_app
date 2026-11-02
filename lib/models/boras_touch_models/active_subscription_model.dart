@@ -32,6 +32,7 @@ class Data {
   String? statusText;
   PackageDetails? packageDetails;
   List<Services>? services;
+  List<dynamic>? addons;
 
   Data({
     this.subscriptionId,
@@ -49,6 +50,7 @@ class Data {
     this.statusText,
     this.packageDetails,
     this.services,
+    this.addons,
   });
 
   factory Data.fromJson(Map<String, dynamic> json) {
@@ -72,10 +74,21 @@ class Data {
       services: json['services'] != null
           ? List<Services>.from(json['services'].map((x) => Services.fromJson(x)))
           : [],
+      addons: json['addons'] is List ? json['addons'] : [],
     );
   }
 
-  bool get isActive => statusText?.toLowerCase() == 'active';
+  bool get isCompleted =>
+      statusText?.toLowerCase() == 'completed' ||
+      (!isTimeBased && remaining != null && remaining! <= 0 && used != null && used! > 0);
+
+  bool get isExpired => statusText?.toLowerCase() == 'expired';
+
+  bool get isActive =>
+      !isCompleted &&
+      !isExpired &&
+      (statusText?.toLowerCase() == 'active' ||
+          (statusText == null && (remaining == null || remaining! > 0)));
 
   bool get isTimeBased {
     final t = packageType?.toLowerCase().trim() ?? '';

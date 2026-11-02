@@ -11,6 +11,7 @@ import '../../components/button.dart';
 import '../../utils/config.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 
 class OrderDetailsScreen extends StatefulWidget {
   final dynamic order;
@@ -62,6 +63,41 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       }
     }
     return fee;
+  }
+
+  double get offHourTotal {
+    final fee = _parseDouble(
+      orderDetails["off_hour_fee"] ??
+          widget.order["off_hour_fee"] ??
+          orderDetails["offHourFee"] ??
+          widget.order["offHourFee"] ??
+          "0",
+    );
+    if (fee > 0) return fee;
+
+    final timeStr = (orderDetails["service_time"] ??
+            orderDetails["schedule_time"] ??
+            widget.order["service_time"] ??
+            widget.order["schedule_time"] ??
+            "")
+        .toString()
+        .trim()
+        .toUpperCase();
+    if (timeStr.isNotEmpty) {
+      try {
+        DateTime parsedTime;
+        if (timeStr.contains('AM') || timeStr.contains('PM')) {
+          parsedTime = DateFormat('hh:mm a').parse(timeStr);
+        } else {
+          parsedTime = DateFormat('HH:mm').parse(timeStr);
+        }
+        final hour = parsedTime.hour;
+        if (hour < 8 || hour >= 20) {
+          return 100.0;
+        }
+      } catch (_) {}
+    }
+    return 0.0;
   }
 
   GetCancelOrderReasons? cancelReasonsData;
@@ -562,7 +598,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       final qInt = int.tryParse(q.toString()) ?? 1;
       final qty = qInt > 0 ? qInt : 1;
       servicesTotal += _parseDouble(item["price"]) * qty;
-      discountTotal += _parseDouble(item["discount"]);
+      discountTotal += _parseDouble(item["discount"]) * qty;
     }
     if (discountTotal <= 0) {
       discountTotal = _parseDouble(orderDetails["discount"] ??
@@ -573,7 +609,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     }
 
     final netServicesTotal = (servicesTotal - discountTotal).clamp(0.0, double.infinity);
-    final totalAmount = netServicesTotal + _extraServiceTotal + travelingTotal;
+    final totalAmount = netServicesTotal + _extraServiceTotal + travelingTotal + offHourTotal;
     //ser end
 
     return Scaffold(
@@ -1931,7 +1967,17 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   Widget _buildPriceDetails(Size size, double totalAmount) {
     double sum = 0;
     for (var i = 0; i < servicesData.length; i++) {
-      sum = sum + (double.tryParse(servicesData[i]["discount"]?.toString() ?? "0") ?? 0.0);
+      final q = servicesData[i]["quantity"] ?? servicesData[i]["qty"] ?? orderDetails["quantity"] ?? widget.order["quantity"] ?? 1;
+      final qInt = int.tryParse(q.toString()) ?? 1;
+      final qty = qInt > 0 ? qInt : 1;
+      sum = sum + ((double.tryParse(servicesData[i]["discount"]?.toString() ?? "0") ?? 0.0) * qty);
+    }
+    if (sum <= 0) {
+      sum = _parseDouble(orderDetails["discount"] ??
+          orderDetails["coupon_amount"] ??
+          widget.order["discount"] ??
+          widget.order["coupon_amount"] ??
+          "0");
     }
 
     final isPaid = _isPaymentCompleted();
@@ -2024,6 +2070,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           _priceRow('Discount', sum),
           if (travelingTotal > 0)
             _priceRow("Traveling Charge", travelingTotal),
+          if (offHourTotal > 0)
+            _priceRow("Night / Off-hour Fee (after 8 PM)", offHourTotal),
           const Divider(),
           _priceRow(
             _isPaymentCompleted() || !_canPerformServiceActions()
@@ -2072,12 +2120,17 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
+          const SizedBox(width: 8),
           GestureDetector(
             onTap: isAdd
                 ? () {

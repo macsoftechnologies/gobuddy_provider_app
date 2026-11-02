@@ -599,10 +599,11 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       final sName = (map["service_name"] ?? map["title"] ?? map["service"] ?? "").toString().trim();
 
       if (!groups.containsKey(key)) {
-        groups[key] = map;
+        final copy = Map<String, dynamic>.from(map);
+        groups[key] = copy;
         groupKeys.add(key);
-        map["_grouped_service_names"] = sName.isNotEmpty ? <String>[sName] : <String>[];
-        map["_grouped_items"] = <Map<String, dynamic>>[map];
+        copy["_grouped_service_names"] = sName.isNotEmpty ? <String>[sName] : <String>[];
+        copy["_grouped_items"] = <Map<String, dynamic>>[Map<String, dynamic>.from(map)];
       } else {
         final existing = groups[key]!;
         final names = (existing["_grouped_service_names"] as List<String>?) ?? <String>[];
@@ -611,20 +612,55 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
           existing["_grouped_service_names"] = names;
         }
         final items = (existing["_grouped_items"] as List<Map<String, dynamic>>?) ?? <Map<String, dynamic>>[];
-        items.add(map);
+        items.add(Map<String, dynamic>.from(map));
         existing["_grouped_items"] = items;
 
-        // Sum prices if total_amount is not present on the booking
-        final p1 = double.tryParse((existing["grand_total"] ?? existing["price"] ?? '0').toString().replaceAll('₹', '').replaceAll(',', '').trim()) ?? 0.0;
-        final p2 = double.tryParse((map["grand_total"] ?? map["price"] ?? '0').toString().replaceAll('₹', '').replaceAll(',', '').trim()) ?? 0.0;
-        final totalAmt = double.tryParse((existing["total_amount"] ?? '0').toString().replaceAll('₹', '').replaceAll(',', '').trim()) ?? 0.0;
-        if (totalAmt <= 0 && p2 > 0) {
-          existing["grand_total"] = (p1 + p2).toStringAsFixed(2);
+        final q1 = int.tryParse((existing["quantity"] ?? existing["qty"] ?? "1").toString()) ?? 1;
+        final q2 = int.tryParse((map["quantity"] ?? map["qty"] ?? "1").toString()) ?? 1;
+        existing["quantity"] = (q1 + q2).toString();
+
+        // Recompute summed net price from unmutated _grouped_items
+        double sumItems = 0.0;
+        for (final gItem in items) {
+          sumItems += _getSingleItemNetAmount(gItem);
+        }
+        if (sumItems > 0) {
+          final summed = sumItems.toStringAsFixed(2);
+          existing["grand_total"] = summed;
+          existing["collected_amount"] = summed;
+          final totalAmt = double.tryParse((existing["total_amount"] ?? '0').toString().replaceAll('₹', '').replaceAll(',', '').trim()) ?? 0.0;
+          if (totalAmt <= sumItems) {
+            existing["total_amount"] = summed;
+            existing["total_order_amount"] = summed;
+          }
         }
       }
     }
 
     return groupKeys.map((k) => groups[k]!).toList();
+  }
+
+  int _getOrderQuantity(dynamic order) {
+    if (order is! Map) return 1;
+    if (order["_grouped_items"] is List && (order["_grouped_items"] as List).isNotEmpty) {
+      int sum = 0;
+      for (var it in order["_grouped_items"]) {
+        if (it is Map) {
+          sum += int.tryParse((it["quantity"] ?? it["qty"] ?? "1").toString()) ?? 1;
+        }
+      }
+      if (sum > 0) return sum;
+    }
+    if (order["services"] is List && (order["services"] as List).isNotEmpty) {
+      int sum = 0;
+      for (var it in order["services"]) {
+        if (it is Map) {
+          sum += int.tryParse((it["quantity"] ?? it["qty"] ?? "1").toString()) ?? 1;
+        }
+      }
+      if (sum > 0) return sum;
+    }
+    return int.tryParse((order["quantity"] ?? order["qty"] ?? "1").toString()) ?? 1;
   }
 
   String _getServiceName(dynamic order) {
@@ -755,17 +791,100 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     return _getDoorstepCollectedAmount(order);
   }
 
+  double _getSingleItemNetAmount(Map item) {
+    final collected = _parseOrderNum(item["collected_amount"]);
+    if (collected > 0) return collected;
+
+    final rawSub = _parseOrderNum(item["sub_total"]);
+    final disc = _parseOrderNum(item["discount"]);
+    final gt = _parseOrderNum(item["grand_total"]);
+    final price = _parseOrderNum(item["price"]);
+    final q = int.tryParse((item["quantity"] ?? item["qty"] ?? "1").toString()) ?? 1;
+    final qty = q > 0 ? q : 1;
+
+    if (rawSub > 0) {
+      if (gt > 0 && (rawSub - disc - gt).abs() < 1.0) {
+        return gt;
+      }
+      return (rawSub - disc).clamp(0.0, double.infinity);
+    }
+    if (gt > 0) return gt;
+    if (price > 0) {
+      return ((price * qty) - disc).clamp(0.0, double.infinity);
+    }
+    return 0.0;
+  }
+
   double _getDoorstepCollectedAmount(dynamic order) {
     if (order == null) return 0.0;
     final doorstepAmt = _parseOrderNum(order["doorstep_amount"]);
     final platformFee = _parseOrderNum(order["platform_fee"]);
     final totalAmt = _parseOrderNum(order["total_amount"]);
+    final discount = _parseOrderNum(order["discount"] ?? order["coupon_amount"]);
+    final rawSubTotal = _parseOrderNum(order["sub_total"]);
+    final collectedAmt = _parseOrderNum(order["collected_amount"]);
+
+    // Multi-item grouped order (from _consolidateOrders)
+    if (order is Map && order["_grouped_items"] is List && (order["_grouped_items"] as List).length > 1) {
+      final items = order["_grouped_items"] as List;
+      double sumNet = 0.0;
+      for (final it in items) {
+        if (it is Map) {
+          sumNet += _getSingleItemNetAmount(it);
+        }
+      }
+      if (sumNet > 0) {
+        return sumNet;
+      }
+    }
 
     if (doorstepAmt > 0 && (platformFee == 0 || doorstepAmt != platformFee)) {
       return doorstepAmt;
     }
 
-    final subTotal = _parseOrderNum(order["sub_total"] ?? order["price"]);
+    if (collectedAmt > 0 && (platformFee == 0 || collectedAmt != platformFee)) {
+      return collectedAmt;
+    }
+
+    // Check if services list exists to compute exact net services total
+    if (order["services"] is List && (order["services"] as List).isNotEmpty) {
+      double sTotal = 0;
+      double dTotal = 0;
+      for (final s in order["services"]) {
+        if (s is Map) {
+          final q = int.tryParse((s["quantity"] ?? s["qty"] ?? "1").toString()) ?? 1;
+          final qty = q > 0 ? q : 1;
+          sTotal += _parseOrderNum(s["price"]) * qty;
+          dTotal += _parseOrderNum(s["discount"]) * qty;
+        }
+      }
+      if (sTotal > 0) {
+        return (sTotal - dTotal).clamp(0.0, double.infinity);
+      }
+    }
+
+    // 1. If total amount is directly specified, return it without double-subtracting discount
+    if (totalAmt > 0 && totalAmt != platformFee) {
+      // If sub_total > total_amount, total_amount already has discount deducted
+      if (rawSubTotal > 0 && totalAmt <= rawSubTotal) {
+        return totalAmt;
+      }
+      return totalAmt;
+    }
+
+    final grandTotal = _parseOrderNum(order["grand_total"] ?? order["total_order_amount"]);
+    if (grandTotal > 0) {
+      if (platformFee > 0 && grandTotal > platformFee) {
+        return (grandTotal - platformFee).clamp(0.0, double.infinity);
+      }
+      return grandTotal;
+    }
+
+    // 2. Otherwise calculate from sub_total or (price * quantity)
+    final unitPrice = _parseOrderNum(order["price"]);
+    final qty = _getOrderQuantity(order);
+    final subTotal = rawSubTotal > 0 ? rawSubTotal : (unitPrice * (qty > 0 ? qty : 1));
+
     final travel = _parseOrderNum(order["travelling_charges"] ?? order["travelingCharge"]);
     double extraTotal = _parseOrderNum(order["extra_charges_total"] ?? order["add_extra_charges"]);
     if (extraTotal == 0.0 && order["extra_charges"] is List) {
@@ -776,20 +895,9 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       }
     }
 
-    if (totalAmt > 0 && totalAmt != platformFee) {
-      return totalAmt;
-    }
-
     if (subTotal > 0) {
-      return subTotal + extraTotal + travel;
-    }
-
-    final grandTotal = _parseOrderNum(order["grand_total"] ?? order["total_order_amount"]);
-    if (grandTotal > 0) {
-      if (platformFee > 0 && grandTotal > platformFee) {
-        return grandTotal - platformFee;
-      }
-      return grandTotal;
+      final net = (subTotal - discount).clamp(0.0, double.infinity);
+      return net + extraTotal + travel;
     }
 
     return 0.0;
@@ -1011,7 +1119,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                               border: Border.all(color: const Color(0xFFC8E6C9)),
                             ),
                             child: Text(
-                              "Qty: ${order["quantity"] ?? order["qty"] ?? 1}",
+                              "Qty: ${_getOrderQuantity(order)}",
                               style: const TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.bold,

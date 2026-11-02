@@ -358,12 +358,15 @@ class _ChangePricesScreenState extends State<ChangePricesScreen> {
 
                 dynamic selItem = {};
 
-                existOrders.forEach(
-                  (var item) => {
-                    if (item["addon_id"] == parsed["addons"][i]["id"])
-                      {selItem = item},
-                  },
-                );
+                if (existOrders != null && existOrders is Iterable) {
+                  for (var item in existOrders) {
+                    if (item is Map && (item["addon_id"]?.toString() == parsed["addons"][i]["id"]?.toString())) {
+                      selItem = item;
+                      break;
+                    }
+                  }
+                }
+
 
                 print(selItem);
 

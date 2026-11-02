@@ -374,13 +374,16 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
   }
 
   Widget _buildSubscriptionCard(Map subscription, Size size) {
-    final status = subscription["status_text"]?.toString() ??
-        ((subscription["status"] == 1 || subscription["status"] == "1")
-            ? "Active"
-            : "Inactive");
-    final isActive = status.toLowerCase() == "active";
+    final rawStatus = (subscription["status_text"] ?? "").toString().toLowerCase().trim();
+    final rem = int.tryParse((subscription["remaining"] ?? "").toString());
+    final usedJobs = int.tryParse((subscription["used"] ?? "").toString()) ?? 0;
     final packageType = subscription["package_type"]?.toString().toLowerCase().trim() ?? '';
     final isTimeBased = packageType == 'time' || packageType == 'months' || packageType == 'month' || packageType == 'duration';
+
+    final bool isCompleted = rawStatus == "completed" || (!isTimeBased && rem != null && rem <= 0 && usedJobs > 0);
+    final bool isExpired = rawStatus == "expired";
+    final bool isActive = !isCompleted && !isExpired && (rawStatus == "active" || ((subscription["status"] == 1 || subscription["status"] == "1") && (rem == null || rem > 0)));
+    final String status = isCompleted ? "Completed" : (isExpired ? "Expired" : (isActive ? "Active" : "Inactive"));
 
     return Container(
       width: double.infinity,
@@ -528,17 +531,19 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
               SizedBox(width: size.width * 0.03),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isActive ? Colors.green : Colors.black87,
+                  backgroundColor: (isCompleted || isExpired)
+                      ? const Color(0xFF00A651)
+                      : (isActive ? Colors.green : Colors.black87),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
+                  elevation: (isCompleted || isExpired) ? 2 : 0,
                 ),
                 onPressed: () {
                    callgetPlansAPI(subscription);
-                           
                 },
-                child: Text(isActive ? "Update" : "Renew"),
+                child: Text((isCompleted || isExpired) ? "Renew" : (isActive ? "Update" : "Renew")),
               ),
             ],
           ),
@@ -589,12 +594,14 @@ class _MySubscriptionsScreenState extends State<MySubscriptionsScreen> {
           ? (selectedPackage["selectedIndex"] as int).clamp(0, packages.length - 1)
           : 0;
       subscription["plan"] = (packages.isNotEmpty) ? packages[selIdx] : {};
-       Navigator.pushNamed(
-                      // ignore: use_build_context_synchronously
-                      context,
-                      Config.changePriceRouteName,
-                      arguments: subscription,
-                    );
+      Navigator.pushNamed(
+        // ignore: use_build_context_synchronously
+        context,
+        Config.PlanSummaryRouteName,
+        arguments: subscription,
+      ).then((value) {
+        callgetSubscriptionsAPI();
+      });
 
 //       Navigator.push(
 //   context,

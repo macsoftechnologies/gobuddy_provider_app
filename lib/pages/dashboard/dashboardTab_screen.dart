@@ -93,7 +93,7 @@ GetUpdateAddressModel? pushintoUpdateAddressModel;
   ); // Orange for '20% OFF' and fire icon
   Map<String, dynamic> dashboardData = {
     "isVerified": false, 
-    "rating": 3.0,
+    "rating": 0.0,
     "location": "35/08-PM Palem, Madhurawada, Visakhapatnam...",
     "profileImageUrl": 'assets/images/user.jpg',
     "totalEarnings": "0",
@@ -813,7 +813,7 @@ Future<void> _getProviderRating() async {
       if (overall != null && mounted) {
         setState(() {
           dashboardData["rating"] =
-              double.tryParse(overall.toString()) ?? dashboardData["rating"];
+              double.tryParse(overall.toString()) ?? 0.0;
         });
       }
     }
@@ -859,6 +859,20 @@ Future<void> _getMyProfileDetails() async {
     Map<String, dynamic> profMap = {};
     if (p != null) {
       profMap = p.toJson();
+    }
+    if (response is Map<String, dynamic> && response["profile"] is Map) {
+      final rawP = response["profile"] as Map;
+      if (rawP["registration_fee"] != null) profMap["registration_fee"] = rawP["registration_fee"].toString();
+      if (rawP["registration_fee_status"] != null) profMap["registration_fee_status"] = rawP["registration_fee_status"].toString();
+    } else if (response is String) {
+      try {
+        final decoded = jsonDecode(response);
+        if (decoded is Map && decoded["profile"] is Map) {
+          final rawP = decoded["profile"] as Map;
+          if (rawP["registration_fee"] != null) profMap["registration_fee"] = rawP["registration_fee"].toString();
+          if (rawP["registration_fee_status"] != null) profMap["registration_fee_status"] = rawP["registration_fee_status"].toString();
+        }
+      } catch (_) {}
     }
     final bool isApproved = UtilClass.isProviderVerified(profMap);
 
@@ -921,9 +935,7 @@ Future<void> _getMyProfileDetails() async {
             p.ekycStatus.toString() != "-1");
 
     final bool hasFee = (profMap["registration_fee"] == "1" || profMap["registration_fee_status"] == "1" ||
-        profMap["status"] == "1" || profMap["status"] == 1 ||
         userData?["registration_fee"] == "1" || userData?["registration_fee_status"] == "1" ||
-        userData?["status"] == "1" || userData?["status"] == 1 ||
         (dashboardDetails.subscriptionCount != null && dashboardDetails.subscriptionCount! > 0) ||
         isApproved);
 

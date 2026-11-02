@@ -55,7 +55,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
       return;
     }
 
-    final userId = _userData['user_id'] ?? _userData['id'];
+    final userId = _userData['user_id'] ?? _userData['id'] ?? Preferences.getUserID();
     if (userId == null) {
       if (mounted) {
         setState(() {

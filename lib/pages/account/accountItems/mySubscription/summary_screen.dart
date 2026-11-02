@@ -189,11 +189,11 @@ class _SummaryScreenState extends State<SummaryScreen> {
     for (var plan in plans) {
       var package = double.tryParse(plan["package"]?.toString() ?? "0") ?? 0.0;
       total += package;
-      if (plan["addons"] is List) {
-        for (var addon in plan["addons"]) {
-          total += double.tryParse(addon["price"]?.toString() ?? "0") ?? 0.0;
-        }
-      }
+      // Addons loop removed: addons are customer-facing rates
+      //
+      //
+      //
+      //
     }
     return total.toString();
   }

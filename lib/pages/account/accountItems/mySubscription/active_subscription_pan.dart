@@ -63,12 +63,15 @@ Future<void> _updatemyActiveSubscription(Data subscription) async {
         };
       }).toList(),
 
-      // "addons": subscription.addons?.map((addon) {
-      //   return {
-      //     "addon_id": addon.addonId,
-      //     "price": addon.price,
-      //   };
-      // }).toList(),
+      "addons": subscription.addons?.map((addon) {
+        if (addon is Map) {
+          return {
+            "addon_id": addon["addon_id"],
+            "price": addon["amount"] ?? addon["price"],
+          };
+        }
+        return addon;
+      }).toList(),
     };
 
     final response = await Repository.postApiRawService(
@@ -430,22 +433,29 @@ const _SubscriptionCard({
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  if (subscription.isActive)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF4CAF50),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text(
-                        'Active',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500),
-                      ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: subscription.isCompleted
+                          ? Colors.orange.shade700
+                          : (subscription.isExpired
+                              ? Colors.red.shade700
+                              : (subscription.isActive ? const Color(0xFF4CAF50) : Colors.grey)),
+                      borderRadius: BorderRadius.circular(20),
                     ),
+                    child: Text(
+                      subscription.isCompleted
+                          ? 'Completed'
+                          : (subscription.isExpired
+                              ? 'Expired'
+                              : (subscription.isActive ? 'Active' : 'Inactive')),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   Text(
                     '₹ ${subscription.formattedAmount}',
@@ -532,6 +542,7 @@ const _SubscriptionCard({
                           "type": service.type,
                           "status": service.status,
                         }).toList() ?? [],
+                        "addons": subscription.addons ?? [],
                       };
                       Navigator.pushNamed(
                         context,

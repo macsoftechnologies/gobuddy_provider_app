@@ -204,7 +204,14 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> with Code
         dynamic parsed = {};
         try {
           parsed = await json.decode(value);
-          if (parsed["status"] == "valid") {
+          final statusVal = parsed["status"];
+          final bool isValid = statusVal == "valid" ||
+              statusVal == 1 ||
+              statusVal == "1" ||
+              statusVal == true ||
+              statusVal?.toString().toLowerCase() == "valid" ||
+              statusVal?.toString().toLowerCase() == "success";
+          if (isValid) {
             // 🔹 1. Merge verified response into userData & Preferences
             final currentUserId = (parsed["user_id"] ?? userIdToSend).toString();
             Map<String, dynamic> mergedUser = {};
@@ -287,9 +294,7 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> with Code
               if (mergedUser["registration_fee"] == "1" ||
                   mergedUser["registration_fee"] == 1 ||
                   mergedUser["registration_fee_status"] == "1" ||
-                  mergedUser["registration_fee_status"] == 1 ||
-                  mergedUser["status"] == "1" ||
-                  mergedUser["status"] == 1) {
+                  mergedUser["registration_fee_status"] == 1) {
                 isFeePaid = true;
               }
 
@@ -328,13 +333,9 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> with Code
 
                       if (adminApproval == "approved" ||
                           adminApproval == "1" ||
-                          ekycStat == "1" ||
-                          ekycStat == "approved" ||
-                          ekycName == "approved" ||
                           subCount > 0 ||
                           p["registration_fee"] == "1" ||
-                          p["registration_fee_status"] == "1" ||
-                          userDbStatus == "1") {
+                          p["registration_fee_status"] == "1") {
                         isFeePaid = true;
                         mergedUser["registration_fee"] = "1";
                         mergedUser["registration_fee_status"] = "1";

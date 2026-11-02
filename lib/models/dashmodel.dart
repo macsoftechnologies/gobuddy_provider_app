@@ -68,6 +68,8 @@ class Profile {
   final String? ekycStatus;
   final String? ekycStatusName;
   final String? skills;
+  final String? registrationFee;
+  final String? registrationFeeStatus;
 
   Profile({
     this.id,
@@ -106,6 +108,8 @@ class Profile {
     this.ekycStatus,
     this.ekycStatusName,
     this.skills,
+    this.registrationFee,
+    this.registrationFeeStatus,
   });
 
   factory Profile.fromJson(Map<String, dynamic> json) {
@@ -146,6 +150,8 @@ class Profile {
       ekycStatus: json['ekyc_status'],
       ekycStatusName: json['ekyc_status_name'],
       skills: json['skills'], // ✅ FIXED
+      registrationFee: json['registration_fee']?.toString(),
+      registrationFeeStatus: json['registration_fee_status']?.toString(),
     );
   }
 
@@ -187,6 +193,8 @@ class Profile {
       'ekyc_status': ekycStatus,
       'ekyc_status_name': ekycStatusName,
       'skills': skills,
+      'registration_fee': registrationFee,
+      'registration_fee_status': registrationFeeStatus,
     };
   }
 }

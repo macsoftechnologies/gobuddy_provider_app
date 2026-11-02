@@ -285,8 +285,7 @@ class _EKYCVerificationPageState extends State<EKYCVerificationPage> {
           } catch (_) {}
 
           final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-          final bool isFromAccount = args?['isFromAccount'] == true ||
-              (Navigator.canPop(context) && (userData["admin_approval_provider"] != null || userData["token"] != null));
+          final bool isFromAccount = args?['isFromAccount'] == true;
 
           showCustomDialog(
             // ignore: use_build_context_synchronously
@@ -327,11 +326,6 @@ class _EKYCVerificationPageState extends State<EKYCVerificationPage> {
     final bool isFromAccount = args?['isFromAccount'] == true;
 
     if (isFromAccount && Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-      return;
-    }
-
-    if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
       return;
     }

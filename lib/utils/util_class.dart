@@ -509,6 +509,17 @@ class UtilClass {
 
     // Handle full URLs
     if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      // If full URL points to domain root but lacks any assets/ path, inject assets/images/
+      if (trimmed.contains("gobuddyindia.com") && !trimmed.contains("assets/")) {
+        final uri = Uri.tryParse(trimmed);
+        if (uri != null && uri.pathSegments.isNotEmpty) {
+          final fileName = uri.pathSegments.last;
+          if (fileName.contains('.')) {
+            final origin = "${uri.scheme}://${uri.host}";
+            return "$origin/assets/images/$fileName";
+          }
+        }
+      }
       final schemeEnd = trimmed.indexOf("://") + 3;
       final scheme = trimmed.substring(0, schemeEnd);
       final rest = trimmed.substring(schemeEnd).replaceAll(RegExp(r'/+'), '/');
@@ -519,6 +530,9 @@ class UtilClass {
     if (!base.endsWith('/')) base = '$base/';
 
     trimmed = trimmed.replaceAll(RegExp(r'^/+'), '');
+    if (trimmed.startsWith('assets/ekyc/')) {
+      return Uri.encodeFull("${base}$trimmed");
+    }
     if (trimmed.startsWith('assets/images/')) {
       trimmed = trimmed.substring('assets/images/'.length);
     }
