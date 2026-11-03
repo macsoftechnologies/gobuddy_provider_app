@@ -276,8 +276,13 @@ class _AccountPageState extends State<AccountPage> {
             ),
           ),
           SafeArea(
-            child: SingleChildScrollView(
-              child: Column(
+            child: RefreshIndicator(
+              onRefresh: () async {
+                callgetProfileAPI();
+              },
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
                 children: [
                   // Header
                   const Padding(
@@ -580,15 +585,6 @@ class _AccountPageState extends State<AccountPage> {
                   ),
                   const Divider(height: 1, color: Color(0xFFE0E0E0)),
                   _buildListTile(
-                    Icons.delete_outline,
-                    "Delete Account",
-                    color: Colors.red,
-                    onTap: () {
-                      _showDeleteAccountDialog();
-                    },
-                  ),
-                  const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                  _buildListTile(
                     Icons.logout,
                     "Logout",
                     color: Colors.red,
@@ -634,6 +630,7 @@ class _AccountPageState extends State<AccountPage> {
                   ),
                   const Divider(height: 1, color: Color(0xFFE0E0E0)),
                 ],
+              ),
               ),
             ),
           ),

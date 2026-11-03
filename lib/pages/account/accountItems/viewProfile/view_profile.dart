@@ -579,17 +579,25 @@ class _ViewProfilePageState extends State<ViewProfilePage> {
               ),
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 28),
 
-            TextButton.icon(
-              onPressed: _showDeleteAccountDialog,
-              icon: const Icon(Icons.delete_outline, color: Colors.red),
-              label: const Text(
-                'Delete Account',
-                style: TextStyle(
-                  color: Colors.red,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+            Center(
+              child: GestureDetector(
+                onTap: _showDeleteAccountDialog,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 8,
+                    horizontal: 12,
+                  ),
+                  child: Text(
+                    'Delete Account',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 12,
+                      fontWeight: FontWeight.w400,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
                 ),
               ),
             ),

@@ -34,6 +34,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   late Map<String, dynamic> serviceData;
   // ---------- SERVICES LIST (MULTIPLE SERVICE ORDERS) ----------
   List<dynamic> servicesData = [];
+  List<dynamic> addonsData = [];
+  double addonsTotalAmount = 0.0;
 
   int selectedServiceIndex = 0;
   dynamic userData = {};
@@ -425,6 +427,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               }
             }
 
+            final loadedAddons = (data["addons"] is List) ? List<dynamic>.from(data["addons"]) : [];
+            addonsData = loadedAddons;
+            addonsTotalAmount = loadedAddons.fold(0.0, (sum, ad) => sum + _parseDouble(ad["price"] ?? ad["amount"]));
+
             final loadedExtra = (data["extra_charges"] is List) ? List<dynamic>.from(data["extra_charges"]) : [];
             if (loadedExtra.isNotEmpty && _extraCharges.isEmpty) {
               _extraCharges = loadedExtra.map((c) => {
@@ -472,6 +478,13 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       UtilClass.showAlertDialog(
         context: context,
         message: "Please accept the order first before verifying customer code.",
+      );
+      return;
+    }
+    if (!_isWithin2HoursOfSchedule()) {
+      UtilClass.showAlertDialog(
+        context: context,
+        message: "This order is scheduled for ${_getOrderScheduleDisplay()}.\nYou can only verify the customer code within 2 hours before the scheduled time.",
       );
       return;
     }
@@ -609,7 +622,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     }
 
     final netServicesTotal = (servicesTotal - discountTotal).clamp(0.0, double.infinity);
-    final totalAmount = netServicesTotal + _extraServiceTotal + travelingTotal + offHourTotal;
+    final totalAmount = netServicesTotal + addonsTotalAmount + _extraServiceTotal + travelingTotal + offHourTotal;
     //ser end
 
     return Scaffold(
@@ -1313,6 +1326,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         .toLowerCase()
         .trim();
     if (status == "open") return false;
+    final isAccepted = orderDetails["is_accepted"] ?? widget.order["is_accepted"];
+    if (isAccepted == 1 || isAccepted == "1" || isAccepted == true) return true;
     final ordId = (orderDetails["id"] ?? widget.order["id"] ?? "").toString().trim();
     final calId = (orderDetails["job_calender_id"] ?? widget.order["job_calender_id"] ?? "").toString().trim();
     final txnId = (orderDetails["order_txn"] ?? widget.order["order_txn"] ?? "").toString().trim();
@@ -1324,12 +1339,140 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         Preferences.isOrderStartedLocally(txnId)) {
       return true;
     }
+    final rawOrderStatus = (orderDetails["order_status"] ?? widget.order["order_status"] ?? "").toString().trim();
+    if (rawOrderStatus == "1" || rawOrderStatus == "2") return true;
     return status == "pending" ||
         status == "accepted" ||
+        status == "scheduled" ||
         status == "started" ||
         status == "in_progress" ||
         status == "ongoing" ||
         status == "completed";
+  }
+
+  DateTime? _parseScheduleDateTime() {
+    final dateStr = (orderDetails["service_date"] ??
+            orderDetails["schedule_date"] ??
+            orderDetails["booking_date"] ??
+            orderDetails["date"] ??
+            widget.order["service_date"] ??
+            widget.order["schedule_date"] ??
+            widget.order["booking_date"] ??
+            widget.order["date"] ??
+            "")
+        .toString()
+        .trim();
+    final timeStr = (orderDetails["service_time"] ??
+            orderDetails["schedule_time"] ??
+            orderDetails["time"] ??
+            widget.order["service_time"] ??
+            widget.order["schedule_time"] ??
+            widget.order["time"] ??
+            "")
+        .toString()
+        .trim();
+
+    if (dateStr.isEmpty) return null;
+
+    try {
+      if (dateStr.contains("T")) {
+        return DateTime.tryParse(dateStr);
+      }
+
+      int year = 0;
+      int month = 0;
+      int day = 0;
+
+      if (dateStr.contains("-")) {
+        final p = dateStr.split("-");
+        if (p.length == 3) {
+          if (p[0].length == 4) {
+            year = int.parse(p[0]);
+            month = int.parse(p[1]);
+            day = int.parse(p[2]);
+          } else {
+            day = int.parse(p[0]);
+            month = int.parse(p[1]);
+            year = int.parse(p[2]);
+          }
+        }
+      } else if (dateStr.contains("/")) {
+        final p = dateStr.split("/");
+        if (p.length == 3) {
+          if (p[0].length == 4) {
+            year = int.parse(p[0]);
+            month = int.parse(p[1]);
+            day = int.parse(p[2]);
+          } else {
+            day = int.parse(p[0]);
+            month = int.parse(p[1]);
+            year = int.parse(p[2]);
+          }
+        }
+      }
+
+      if (year == 0) return null;
+
+      int hour = 0;
+      int minute = 0;
+
+      if (timeStr.isNotEmpty) {
+        final isPM = timeStr.toUpperCase().contains("PM");
+        final isAM = timeStr.toUpperCase().contains("AM");
+        final cleanTime = timeStr.replaceAll(RegExp(r'[a-zA-Z]'), '').trim();
+        final tp = cleanTime.split(":");
+        if (tp.isNotEmpty) {
+          hour = int.tryParse(tp[0]) ?? 0;
+          if (tp.length > 1) {
+            minute = int.tryParse(tp[1]) ?? 0;
+          }
+          if (isPM && hour < 12) hour += 12;
+          if (isAM && hour == 12) hour = 0;
+        }
+      }
+
+      return DateTime(year, month, day, hour, minute);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _isWithin2HoursOfSchedule() {
+    final ordId = (orderDetails["id"] ?? widget.order["id"] ?? "").toString().trim();
+    final calId = (orderDetails["job_calender_id"] ?? widget.order["job_calender_id"] ?? "").toString().trim();
+    final txnId = (orderDetails["order_txn"] ?? widget.order["order_txn"] ?? "").toString().trim();
+    if (Preferences.isOrderStartedLocally(ordId) ||
+        Preferences.isOrderStartedLocally(calId) ||
+        Preferences.isOrderStartedLocally(txnId)) {
+      return true;
+    }
+
+    final schedDt = _parseScheduleDateTime();
+    if (schedDt == null) return true;
+
+    final now = DateTime.now();
+    final earliestStart = schedDt.subtract(const Duration(hours: 2));
+    return now.isAfter(earliestStart) || now.isAtSameMomentAs(earliestStart);
+  }
+
+  String _getOrderScheduleDisplay() {
+    final date = (orderDetails["service_date"] ??
+            orderDetails["schedule_date"] ??
+            widget.order["service_date"] ??
+            widget.order["schedule_date"] ??
+            "")
+        .toString()
+        .trim();
+    final time = (orderDetails["service_time"] ??
+            orderDetails["schedule_time"] ??
+            widget.order["service_time"] ??
+            widget.order["schedule_time"] ??
+            "")
+        .toString()
+        .trim();
+    if (date.isNotEmpty && time.isNotEmpty) return "$date at $time";
+    if (date.isNotEmpty) return date;
+    return "scheduled time";
   }
 
   String _getOrderTotalDisplay() {
@@ -1340,7 +1483,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       final qty = qInt > 0 ? qInt : 1;
       servicesTotal += _parseDouble(item["price"]) * qty;
     }
-    final liveTotal = servicesTotal + _extraServiceTotal + travelingTotal;
+    final liveTotal = servicesTotal + addonsTotalAmount + _extraServiceTotal + travelingTotal;
     if (liveTotal > 0) {
       return "₹${liveTotal.toStringAsFixed(0)}";
     }
@@ -1645,6 +1788,32 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     Expanded(
                       child: Text(
                         "Please accept this order first to enter customer verification code.",
+                        style: TextStyle(
+                          color: Colors.amber.shade900,
+                          fontSize: size.width * 0.033,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else if (!_isWithin2HoursOfSchedule())
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber.shade400),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.access_time, color: Colors.amber.shade900, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Job scheduled for ${_getOrderScheduleDisplay()}.\nCustomer verification code can be entered within 2 hours before the scheduled time.",
                         style: TextStyle(
                           color: Colors.amber.shade900,
                           fontSize: size.width * 0.033,
@@ -2020,6 +2189,16 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               return _priceRow(sName, linePrice);
             }).toList(),
           ),
+
+          // Display Add-ons
+          if (addonsData.isNotEmpty)
+            Column(
+              children: addonsData.map((ad) {
+                final name = (ad["addon_name"] ?? ad["addon_service"] ?? "Add-on").toString();
+                final price = _parseDouble(ad["price"] ?? ad["amount"]);
+                return _priceRow("Add-on: $name", price);
+              }).toList(),
+            ),
 
           // Display extra service charges
           if (_extraCharges.isNotEmpty)

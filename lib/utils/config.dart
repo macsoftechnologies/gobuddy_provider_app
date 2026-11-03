@@ -1,4 +1,4 @@
-class Config {
+﻿class Config {
 
   static const name = "Name";
   //strings
@@ -256,6 +256,6 @@ class Config {
    static const getActiveSubscriptionsRouteName = 'active_subscription_screen_Route';
 
    // Razorpay
-  //  static const String razorpayKey = "rzp_live_ZdGjJKZdukGGzL";
-  static const String razorpayKey = "rzp_test_B54BlMynixkzHI";
+  // static const String razorpayKey = "rzp_test_B54BlMynixkzHI"; // Test Key
+  static const String razorpayKey = "rzp_live_ZdGjJKZdukGGzL"; // Live Key
 }

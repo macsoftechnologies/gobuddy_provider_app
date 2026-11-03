@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 // ignore_for_file: use_build_context_synchronously, avoid_print
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -40,7 +40,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
   void _startCountdownTimer() {
     _countdownTimer?.cancel();
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted && selectedTab.toLowerCase() == "open") {
+      if (mounted && (selectedTab.toLowerCase() == "open" || selectedTab.toLowerCase() == "pending")) {
         setState(() {});
       }
     });
@@ -50,6 +50,50 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
   void dispose() {
     _countdownTimer?.cancel();
     super.dispose();
+  }
+
+  bool _isOrderAccepted(dynamic o) {
+    if (o is! Map) return false;
+    final id = (o["id"] ?? "").toString().trim();
+    final jobCalId = (o["job_calender_id"] ?? "").toString().trim();
+    final ordTxn = (o["order_txn"] ?? o["order_id"] ?? "").toString().trim();
+    final status = (o["status"] ?? "").toString().toLowerCase().trim();
+    final orderStatus = (o["order_status"] ?? "").toString().toLowerCase().trim();
+    final pId = (o["provider_id"] ?? o["assigned_to"] ?? "").toString().trim();
+    final userId = (userData["user_id"] ?? "").toString().trim();
+
+    // 1. If assigned to this provider and not unassigned/admin (4577)
+    if (pId.isNotEmpty && pId != "0" && pId != "null" && pId != "4577" && userId.isNotEmpty && pId == userId) {
+      return true;
+    }
+
+    // 2. If explicitly marked accepted by provider
+    if (o["is_accepted"] == 1 || o["is_accepted"] == "1" || o["is_accepted"] == true) {
+      return true;
+    }
+
+    // 3. If backend sets status to accepted, pending, scheduled, started, etc.
+    if (status == "accepted" ||
+        status == "pending" ||
+        status == "scheduled" ||
+        status == "started" ||
+        status == "in_progress" ||
+        status == "ongoing" ||
+        orderStatus == "1" ||
+        orderStatus == "pending" ||
+        orderStatus == "scheduled" ||
+        orderStatus == "accepted") {
+      return true;
+    }
+
+    // 4. Check persistent local preferences
+    if (Preferences.isOrderAcceptedLocally(id) ||
+        Preferences.isOrderAcceptedLocally(jobCalId) ||
+        Preferences.isOrderAcceptedLocally(ordTxn)) {
+      return true;
+    }
+
+    return false;
   }
 
   void callOrdersPI(tab) async {
@@ -63,7 +107,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     try {
       final tabKey = tab.toString().toLowerCase();
       List<dynamic> fetchedOrders = [];
-      final userId = userData["user_id"]?.toString() ?? "";
+      final userId = (userData["user_id"] ?? userData["id"] ?? "").toString().trim();
 
       List<dynamic>? extractOrders(dynamic parsed) {
         if (parsed is Map) {
@@ -104,48 +148,24 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
             orderStatus == "2";
       }
 
-      bool isOrderAccepted(dynamic o) {
-        if (o is! Map) return false;
-        final id = (o["id"] ?? "").toString().trim();
-        final jobCalId = (o["job_calender_id"] ?? "").toString().trim();
-        final ordTxn = (o["order_txn"] ?? o["order_id"] ?? "").toString().trim();
-        final status = (o["status"] ?? o["order_status"] ?? "").toString().toLowerCase().trim();
-
-        // If backend explicitly sets status to accepted or started
-        if (status == "accepted" ||
-            status == "started" ||
-            status == "in_progress" ||
-            status == "ongoing") {
-          return true;
-        }
-        if (o["is_accepted"] == 1 || o["is_accepted"] == "1" || o["is_accepted"] == true) {
-          return true;
-        }
-
-        // Check persistent local preferences
-        if (Preferences.isOrderAcceptedLocally(id) ||
-            Preferences.isOrderAcceptedLocally(jobCalId) ||
-            Preferences.isOrderAcceptedLocally(ordTxn)) {
-          return true;
-        }
-
-        return false;
-      }
+      bool isOrderAccepted(dynamic o) => _isOrderAccepted(o);
 
       bool belongsToProvider(dynamic o) {
         if (o is! Map) return false;
+        if (_isOrderAccepted(o)) return true;
         final pId = (o["provider_id"] ?? o["assigned_to"] ?? "").toString().trim();
-        if (pId.isNotEmpty && pId != "0" && pId != "null") {
+        if (pId.isNotEmpty && pId != "0" && pId != "null" && pId != "4577") {
           return pId == userId;
         }
-        final uId = (o["user_id"] ?? "").toString().trim();
-        return uId.isEmpty || uId == userId;
+        return true;
       }
 
       bool isOrderOpen(dynamic o) {
         if (isOrderCancelled(o) || isOrderCompleted(o)) return false;
-        // If the order has already been accepted, it moves to Pending tab!
+        // If the order has already been accepted or assigned, it MUST NOT be in Open!
         if (isOrderAccepted(o)) return false;
+        final pId = (o["provider_id"] ?? o["assigned_to"] ?? "").toString().trim();
+        if (pId.isNotEmpty && pId != "0" && pId != "null" && pId != "4577") return false;
         return true;
       }
 
@@ -169,19 +189,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
           }
         } catch (_) {}
 
-        // 2. Also fetch newly assigned orders for this provider (which arrive via pendingOrders)
-        try {
-          final res = await Repository.postApiService(EndPoints.pendingOrders, {
-            "provider_id": userId,
-          });
-          dynamic parsed = res is String ? json.decode(res) : res;
-          final list = extractOrders(parsed);
-          if (list != null && list.isNotEmpty) {
-            for (var o in list) {
-              if (isOrderOpen(o)) fetchedOrders.add(o);
-            }
-          }
-        } catch (_) {}
+
 
         // 3. Fallback to getOrders API
         if (fetchedOrders.isEmpty) {
@@ -596,7 +604,13 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         key = "idx_${groupKeys.length}";
       }
 
-      final sName = (map["service_name"] ?? map["title"] ?? map["service"] ?? "").toString().trim();
+      String sName = (map["service_name"] ?? map["title"] ?? map["service"] ?? "").toString().trim();
+      if (sName.isEmpty && map["services"] is List && (map["services"] as List).isNotEmpty) {
+        final first = (map["services"] as List).first;
+        if (first is Map) {
+          sName = (first["service_name"] ?? first["title"] ?? first["service"] ?? "").toString().trim();
+        }
+      }
 
       if (!groups.containsKey(key)) {
         final copy = Map<String, dynamic>.from(map);
@@ -606,6 +620,27 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         copy["_grouped_items"] = <Map<String, dynamic>>[Map<String, dynamic>.from(map)];
       } else {
         final existing = groups[key]!;
+        for (final k in [
+          "coupon_amount",
+          "coupon_id",
+          "coupon_name",
+          "doorstep_amount",
+          "total_amount",
+          "collected_amount",
+          "total_order_amount",
+          "platform_fee",
+          "gb_coins",
+          "off_hour_fee",
+          "travelling_charges",
+          "payment_id",
+          "is_subscription",
+          "discount",
+        ]) {
+          if ((existing[k] == null || existing[k].toString().isEmpty || existing[k] == "0" || existing[k] == 0) &&
+              map[k] != null && map[k].toString().isNotEmpty && map[k] != "0" && map[k] != 0) {
+            existing[k] = map[k];
+          }
+        }
         final names = (existing["_grouped_service_names"] as List<String>?) ?? <String>[];
         if (sName.isNotEmpty && !names.contains(sName)) {
           names.add(sName);
@@ -620,19 +655,31 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         existing["quantity"] = (q1 + q2).toString();
 
         // Recompute summed net price from unmutated _grouped_items
-        double sumItems = 0.0;
+        double sTotal = 0.0;
+        double dTotal = 0.0;
+        double aTotal = 0.0;
         for (final gItem in items) {
-          sumItems += _getSingleItemNetAmount(gItem);
+          final p = _parseOrderNum(gItem["price"]);
+          final q = int.tryParse((gItem["quantity"] ?? gItem["qty"] ?? "1").toString()) ?? 1;
+          final qty = q > 0 ? q : 1;
+          sTotal += p * qty;
+          dTotal += _parseOrderNum(gItem["discount"]) * qty;
+          aTotal += _parseOrderNum(gItem["addons_total"]);
         }
-        if (sumItems > 0) {
-          final summed = sumItems.toStringAsFixed(2);
+        if (dTotal <= 0) {
+          dTotal = _parseOrderNum(existing["discount"] ?? existing["coupon_amount"] ?? map["coupon_amount"] ?? map["discount"]);
+        }
+        final netSum = (sTotal - dTotal + aTotal).clamp(0.0, double.infinity);
+        final existingDoorstep = _parseOrderNum(existing["doorstep_amount"]);
+        final existingTotal = _parseOrderNum(existing["total_amount"]);
+        final existingCollected = _parseOrderNum(existing["collected_amount"]);
+        if (existingDoorstep <= 0 && existingCollected <= 0 && existingTotal <= 0 && netSum > 0) {
+          final summed = netSum.toStringAsFixed(2);
           existing["grand_total"] = summed;
           existing["collected_amount"] = summed;
-          final totalAmt = double.tryParse((existing["total_amount"] ?? '0').toString().replaceAll('₹', '').replaceAll(',', '').trim()) ?? 0.0;
-          if (totalAmt <= sumItems) {
-            existing["total_amount"] = summed;
-            existing["total_order_amount"] = summed;
-          }
+          existing["doorstep_amount"] = summed;
+          existing["total_amount"] = summed;
+          existing["total_order_amount"] = summed;
         }
       }
     }
@@ -791,101 +838,30 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     return _getDoorstepCollectedAmount(order);
   }
 
-  double _getSingleItemNetAmount(Map item) {
-    final collected = _parseOrderNum(item["collected_amount"]);
-    if (collected > 0) return collected;
-
-    final rawSub = _parseOrderNum(item["sub_total"]);
-    final disc = _parseOrderNum(item["discount"]);
-    final gt = _parseOrderNum(item["grand_total"]);
-    final price = _parseOrderNum(item["price"]);
-    final q = int.tryParse((item["quantity"] ?? item["qty"] ?? "1").toString()) ?? 1;
-    final qty = q > 0 ? q : 1;
-
-    if (rawSub > 0) {
-      if (gt > 0 && (rawSub - disc - gt).abs() < 1.0) {
-        return gt;
-      }
-      return (rawSub - disc).clamp(0.0, double.infinity);
-    }
-    if (gt > 0) return gt;
-    if (price > 0) {
-      return ((price * qty) - disc).clamp(0.0, double.infinity);
-    }
-    return 0.0;
-  }
-
   double _getDoorstepCollectedAmount(dynamic order) {
     if (order == null) return 0.0;
-    final doorstepAmt = _parseOrderNum(order["doorstep_amount"]);
-    final platformFee = _parseOrderNum(order["platform_fee"]);
-    final totalAmt = _parseOrderNum(order["total_amount"]);
-    final discount = _parseOrderNum(order["discount"] ?? order["coupon_amount"]);
-    final rawSubTotal = _parseOrderNum(order["sub_total"]);
-    final collectedAmt = _parseOrderNum(order["collected_amount"]);
 
-    // Multi-item grouped order (from _consolidateOrders)
-    if (order is Map && order["_grouped_items"] is List && (order["_grouped_items"] as List).length > 1) {
-      final items = order["_grouped_items"] as List;
-      double sumNet = 0.0;
-      for (final it in items) {
-        if (it is Map) {
-          sumNet += _getSingleItemNetAmount(it);
+    double offHour = _parseOrderNum(order["off_hour_fee"] ?? order["offHourFee"]);
+    if (offHour <= 0 && (order["is_off_hour"] == true || order["is_off_hour"] == 1 || order["is_off_hour"] == "1")) {
+      offHour = 100.0;
+    }
+    if (offHour <= 0) {
+      final t = (order["schedule_time"] ?? "").toString().trim().toUpperCase();
+      if (t.isNotEmpty) {
+        final parts = t.split(RegExp(r"[:\s]"));
+        if (parts.isNotEmpty) {
+          int? hour = int.tryParse(parts[0]);
+          if (hour != null) {
+            if (t.contains("PM") && hour < 12) hour += 12;
+            if (t.contains("AM") && hour == 12) hour = 0;
+            if (hour >= 20 || hour < 8) {
+              offHour = 100.0;
+            }
+          }
         }
       }
-      if (sumNet > 0) {
-        return sumNet;
-      }
     }
 
-    if (doorstepAmt > 0 && (platformFee == 0 || doorstepAmt != platformFee)) {
-      return doorstepAmt;
-    }
-
-    if (collectedAmt > 0 && (platformFee == 0 || collectedAmt != platformFee)) {
-      return collectedAmt;
-    }
-
-    // Check if services list exists to compute exact net services total
-    if (order["services"] is List && (order["services"] as List).isNotEmpty) {
-      double sTotal = 0;
-      double dTotal = 0;
-      for (final s in order["services"]) {
-        if (s is Map) {
-          final q = int.tryParse((s["quantity"] ?? s["qty"] ?? "1").toString()) ?? 1;
-          final qty = q > 0 ? q : 1;
-          sTotal += _parseOrderNum(s["price"]) * qty;
-          dTotal += _parseOrderNum(s["discount"]) * qty;
-        }
-      }
-      if (sTotal > 0) {
-        return (sTotal - dTotal).clamp(0.0, double.infinity);
-      }
-    }
-
-    // 1. If total amount is directly specified, return it without double-subtracting discount
-    if (totalAmt > 0 && totalAmt != platformFee) {
-      // If sub_total > total_amount, total_amount already has discount deducted
-      if (rawSubTotal > 0 && totalAmt <= rawSubTotal) {
-        return totalAmt;
-      }
-      return totalAmt;
-    }
-
-    final grandTotal = _parseOrderNum(order["grand_total"] ?? order["total_order_amount"]);
-    if (grandTotal > 0) {
-      if (platformFee > 0 && grandTotal > platformFee) {
-        return (grandTotal - platformFee).clamp(0.0, double.infinity);
-      }
-      return grandTotal;
-    }
-
-    // 2. Otherwise calculate from sub_total or (price * quantity)
-    final unitPrice = _parseOrderNum(order["price"]);
-    final qty = _getOrderQuantity(order);
-    final subTotal = rawSubTotal > 0 ? rawSubTotal : (unitPrice * (qty > 0 ? qty : 1));
-
-    final travel = _parseOrderNum(order["travelling_charges"] ?? order["travelingCharge"]);
     double extraTotal = _parseOrderNum(order["extra_charges_total"] ?? order["add_extra_charges"]);
     if (extraTotal == 0.0 && order["extra_charges"] is List) {
       for (final ec in order["extra_charges"]) {
@@ -894,55 +870,109 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         }
       }
     }
+    final travel = _parseOrderNum(order["travelling_charges"] ?? order["travelingCharge"]);
 
-    if (subTotal > 0) {
-      final net = (subTotal - discount).clamp(0.0, double.infinity);
-      return net + extraTotal + travel;
+    // If order is explicitly 100% subscription covered, collection is only extra + travel + off-hour
+    final paymentId = (order["payment_id"] ?? "").toString().trim();
+    final isSub = paymentId == "SUBSCRIPTION_COVERED" ||
+        order["is_subscription"] == "1" ||
+        order["is_subscription"] == 1 ||
+        order["is_subscription"] == true ||
+        order["is_subscription"] == "true";
+    if (isSub) {
+      return extraTotal + travel + offHour;
+    }
+
+    // 1. Calculate live services and discount directly (matches OrderDetailsScreen)
+    double sTotal = 0.0;
+    double dTotal = 0.0;
+    double aTotal = _parseOrderNum(order["addons_total"]);
+
+    List? itemsList;
+    if (order["services"] is List && (order["services"] as List).isNotEmpty) {
+      itemsList = order["services"] as List;
+    } else if (order is Map && order["_grouped_items"] is List && (order["_grouped_items"] as List).isNotEmpty) {
+      itemsList = order["_grouped_items"] as List;
+    }
+
+    if (itemsList != null && itemsList.isNotEmpty) {
+      for (final it in itemsList) {
+        if (it is Map) {
+          final p = _parseOrderNum(it["price"]);
+          final q = int.tryParse((it["quantity"] ?? it["qty"] ?? "1").toString()) ?? 1;
+          final qty = q > 0 ? q : 1;
+          sTotal += p * qty;
+          dTotal += _parseOrderNum(it["discount"]) * qty;
+          aTotal += _parseOrderNum(it["addons_total"]);
+        }
+      }
+    } else {
+      final unitPrice = _parseOrderNum(order["price"]);
+      final q = _getOrderQuantity(order);
+      final qty = q > 0 ? q : 1;
+      final rawSubTotal = _parseOrderNum(order["sub_total"]);
+      sTotal = rawSubTotal > 0 ? rawSubTotal : (unitPrice * qty);
+    }
+
+    final orderDiscount = _parseOrderNum(order["discount"] ?? order["coupon_amount"]);
+    if (dTotal <= 0) {
+      dTotal = orderDiscount;
+    }
+
+    if (sTotal > 0) {
+      final netServices = (sTotal - dTotal).clamp(0.0, double.infinity);
+      return (netServices + aTotal + extraTotal + travel + offHour).clamp(0.0, double.infinity);
+    }
+
+    // Fallbacks if no services list available
+    final doorstepAmt = _parseOrderNum(order["doorstep_amount"]);
+    final collectedAmt = _parseOrderNum(order["collected_amount"]);
+    final totalAmt = _parseOrderNum(order["total_amount"] ?? order["total_order_amount"]);
+    final platformFee = _parseOrderNum(order["platform_fee"]);
+
+    if (doorstepAmt > 0) {
+      if (platformFee > 0 && totalAmt > 0 && (doorstepAmt - totalAmt).abs() < 0.01 && doorstepAmt > platformFee) {
+        return (doorstepAmt - platformFee).clamp(0.0, double.infinity);
+      }
+      return doorstepAmt;
+    }
+
+    if (collectedAmt > 0) {
+      if (platformFee > 0 && totalAmt > 0 && (collectedAmt - totalAmt).abs() < 0.01 && collectedAmt > platformFee) {
+        return (collectedAmt - platformFee).clamp(0.0, double.infinity);
+      }
+      return collectedAmt;
+    }
+
+    if (totalAmt > 0) {
+      if (platformFee > 0 && totalAmt > platformFee) {
+        return (totalAmt - platformFee).clamp(0.0, double.infinity);
+      }
+      return totalAmt;
     }
 
     return 0.0;
   }
 
   String _getOrderAmount(dynamic order) {
-    if (order == null) return "₹ 0";
-    if (order is Map && order["_grouped_items"] is List && (order["_grouped_items"] as List).length > 1) {
-      final total = _getDoorstepCollectedAmount(order);
-      if (total > 0) {
-        return "₹ ${total.toStringAsFixed(0)}";
-      }
-      final items = order["_grouped_items"] as List;
-      double sum = 0.0;
-      for (var it in items) {
-        final p = double.tryParse((it["grand_total"] ?? it["price"] ?? it["total_amount"] ?? "0").toString().replaceAll('₹', '').replaceAll(',', '').trim()) ?? 0.0;
-        sum += p;
-      }
-      if (sum > 0) {
-        return "₹ ${sum.toStringAsFixed(0)}";
-      }
-    }
+    if (order == null) return "\u20B9 0";
     final total = _getDoorstepCollectedAmount(order);
     if (total > 0) {
-      return "₹ ${total.toStringAsFixed(0)}";
+      return "\u20B9 ${total.toStringAsFixed(0)}";
     }
     for (final key in [
       "doorstep_amount",
-      "sub_total",
+      "collected_amount",
       "total_amount",
+      "sub_total",
       "amount",
       "price",
-      "total_order_amount",
       "grand_total",
-      "order_amount",
-      "package",
     ]) {
-      final val = order[key];
-      if (val != null &&
-          val.toString().trim().isNotEmpty &&
-          val.toString().trim() != "0") {
-        return "₹ ${val.toString().trim()}";
-      }
+      final val = _parseOrderNum(order[key]);
+      if (val > 0) return "\u20B9 ${val.toStringAsFixed(0)}";
     }
-    return "₹ 399";
+    return "\u20B9 0";
   }
 
   String _getOrderImage(dynamic order) {
@@ -959,6 +989,15 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         return UtilClass.formatProfileImageUrl(val.toString().trim());
       }
     }
+    if (order is Map && order["services"] is List && (order["services"] as List).isNotEmpty) {
+      final first = (order["services"] as List).first;
+      if (first is Map) {
+        final img = (first["service_image"] ?? first["image"] ?? "").toString().trim();
+        if (img.isNotEmpty) {
+          return UtilClass.formatProfileImageUrl(img);
+        }
+      }
+    }
     return "";
   }
 
@@ -968,6 +1007,25 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     final status = (order["status"] ?? order["order_status"] ?? "").toString().toLowerCase().trim();
     if (status.contains("expire") || status == "3" || status == "cancelled" || status == "canceled") {
       return "Expired";
+    }
+
+    // For scheduled bookings, active until the scheduled service time
+    final schedDt = _parseScheduleDateTime(order);
+    if (schedDt != null) {
+      final now = DateTime.now();
+      if (now.isBefore(schedDt)) {
+        final remaining = schedDt.difference(now);
+        final hours = remaining.inHours;
+        final mins = remaining.inMinutes % 60;
+        if (hours > 0) {
+          return "${hours}h ${mins}m left";
+        } else {
+          final secs = remaining.inSeconds % 60;
+          return "${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}";
+        }
+      } else {
+        return "Expired";
+      }
     }
 
     final createdAtStr = (order["created_at"] ?? order["date_time"] ?? order["order_date"] ?? "").toString().trim();
@@ -1259,7 +1317,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     }
 
     // 3. Open Tab: Figma shows Cancel + Accept buttons & Price + Timer
-    if (currentTab == "open" && status != "accepted" && status != "started") {
+    if (currentTab == "open" && !_isOrderAccepted(order)) {
       final timerText = _getOrderTimer(order);
       final isExpired = timerText.toLowerCase().contains("expire");
 
@@ -1368,6 +1426,8 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         Preferences.isOrderStartedLocally(jobCalId) ||
         Preferences.isOrderStartedLocally(ordTxn);
 
+    final bool canStart = isStarted || _canStartOrder(order);
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -1383,12 +1443,16 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                         callOrdersPI(selectedTab);
                       });
                 }
-              : () => _startOrder(order),
+              : (canStart ? () => _startOrder(order) : () => _showEarlyStartDialog(order)),
           style: ElevatedButton.styleFrom(
-            backgroundColor: isStarted ? const Color(0xFF2E7D32) : const Color(0xFFE8EAF6),
-            foregroundColor: isStarted ? Colors.white : const Color(0xFF4A409A),
+            backgroundColor: isStarted
+                ? const Color(0xFF2E7D32)
+                : (canStart ? const Color(0xFFE8EAF6) : Colors.grey.shade200),
+            foregroundColor: isStarted
+                ? Colors.white
+                : (canStart ? const Color(0xFF4A409A) : Colors.grey.shade600),
             elevation: 0,
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
             ),
@@ -1399,13 +1463,20 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
               if (isStarted) ...[
                 const Icon(Icons.play_arrow, size: 16, color: Colors.white),
                 const SizedBox(width: 4),
+              ] else if (!canStart) ...[
+                Icon(Icons.lock_outline, size: 14, color: Colors.grey.shade600),
+                const SizedBox(width: 4),
               ],
               Text(
-                isStarted ? "Continue" : "Start",
+                isStarted
+                    ? "Continue"
+                    : (canStart ? "Start" : "Start (2h prior)"),
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
-                  color: isStarted ? Colors.white : const Color(0xFF4A409A),
+                  color: isStarted
+                      ? Colors.white
+                      : (canStart ? const Color(0xFF4A409A) : Colors.grey.shade600),
                 ),
               ),
             ],
@@ -1423,7 +1494,173 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     );
   }
 
+  DateTime? _parseScheduleDateTime(dynamic order) {
+    if (order == null || order is! Map) return null;
+    final dateStr = (order["service_date"] ??
+            order["schedule_date"] ??
+            order["booking_date"] ??
+            order["date"] ??
+            "")
+        .toString()
+        .trim();
+    final timeStr = (order["service_time"] ??
+            order["schedule_time"] ??
+            order["time"] ??
+            "")
+        .toString()
+        .trim();
+
+    if (dateStr.isEmpty) return null;
+
+    try {
+      if (dateStr.contains("T")) {
+        return DateTime.tryParse(dateStr);
+      }
+
+      int year = 0;
+      int month = 0;
+      int day = 0;
+
+      if (dateStr.contains("-")) {
+        final p = dateStr.split("-");
+        if (p.length == 3) {
+          if (p[0].length == 4) {
+            year = int.parse(p[0]);
+            month = int.parse(p[1]);
+            day = int.parse(p[2]);
+          } else {
+            day = int.parse(p[0]);
+            month = int.parse(p[1]);
+            year = int.parse(p[2]);
+          }
+        }
+      } else if (dateStr.contains("/")) {
+        final p = dateStr.split("/");
+        if (p.length == 3) {
+          if (p[0].length == 4) {
+            year = int.parse(p[0]);
+            month = int.parse(p[1]);
+            day = int.parse(p[2]);
+          } else {
+            day = int.parse(p[0]);
+            month = int.parse(p[1]);
+            year = int.parse(p[2]);
+          }
+        }
+      }
+
+      if (year == 0) return null;
+
+      int hour = 0;
+      int minute = 0;
+
+      if (timeStr.isNotEmpty) {
+        final isPM = timeStr.toUpperCase().contains("PM");
+        final isAM = timeStr.toUpperCase().contains("AM");
+        final cleanTime = timeStr.replaceAll(RegExp(r'[a-zA-Z]'), '').trim();
+        final tp = cleanTime.split(":");
+        if (tp.isNotEmpty) {
+          hour = int.tryParse(tp[0]) ?? 0;
+          if (tp.length > 1) {
+            minute = int.tryParse(tp[1]) ?? 0;
+          }
+          if (isPM && hour < 12) hour += 12;
+          if (isAM && hour == 12) hour = 0;
+        }
+      }
+
+      return DateTime(year, month, day, hour, minute);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _canStartOrder(dynamic order) {
+    final id = (order["id"] ?? "").toString().trim();
+    final jobCalId = (order["job_calender_id"] ?? "").toString().trim();
+    final ordTxn = (order["order_txn"] ?? "").toString().trim();
+    final status = (order["status"] ?? order["order_status"] ?? "").toString().toLowerCase().trim();
+    if (status == "started" ||
+        status == "in_progress" ||
+        status == "ongoing" ||
+        Preferences.isOrderStartedLocally(id) ||
+        Preferences.isOrderStartedLocally(jobCalId) ||
+        Preferences.isOrderStartedLocally(ordTxn)) {
+      return true;
+    }
+
+    final schedDt = _parseScheduleDateTime(order);
+    if (schedDt == null) return true;
+
+    final now = DateTime.now();
+    final earliestStart = schedDt.subtract(const Duration(hours: 2));
+    return now.isAfter(earliestStart) || now.isAtSameMomentAs(earliestStart);
+  }
+
+  void _showEarlyStartDialog(dynamic order) {
+    final schedDt = _parseScheduleDateTime(order);
+    String schedText = _getOrderSchedule(order);
+    String earliestText = "2 hours before scheduled time";
+    if (schedDt != null) {
+      final earliest = schedDt.subtract(const Duration(hours: 2));
+      final h = earliest.hour > 12 ? earliest.hour - 12 : (earliest.hour == 0 ? 12 : earliest.hour);
+      final m = earliest.minute.toString().padLeft(2, '0');
+      final ampm = earliest.hour >= 12 ? 'PM' : 'AM';
+      earliestText = "${earliest.day.toString().padLeft(2, '0')}/${earliest.month.toString().padLeft(2, '0')}/${earliest.year} at $h:$m $ampm";
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.schedule, color: Colors.orange, size: 24),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                "Job Scheduled for Later",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Scheduled Time:\n$schedText",
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              "You can tap 'Start' and begin travelling to the customer site 2 hours before the scheduled time.\n\nStart will enable on:\n$earliestText",
+              style: TextStyle(fontSize: 13, height: 1.4, color: Colors.grey.shade700),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00A651),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Understood"),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _startOrder(dynamic order) async {
+    if (!_canStartOrder(order)) {
+      _showEarlyStartDialog(order);
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1464,19 +1701,33 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       final ordId = (order["id"] ?? "").toString().trim();
       final calId = (order["job_calender_id"] ?? "").toString().trim();
       final txnId = (order["order_txn"] ?? order["order_id"] ?? "").toString().trim();
-      if (orderId != null) Preferences.addStartedOrderId(orderId.toString().trim());
-      if (ordId.isNotEmpty) Preferences.addStartedOrderId(ordId);
-      if (calId.isNotEmpty) Preferences.addStartedOrderId(calId);
-      if (txnId.isNotEmpty) Preferences.addStartedOrderId(txnId);
 
       try {
-        await Repository.postApiService(EndPoints.orderaccept, {
+        final resp = await Repository.postApiService(EndPoints.orderaccept, {
           "job_calender_id": orderId.toString(),
           "provider_id": (userData["user_id"] ?? userData["id"] ?? "")
               .toString(),
           "status": "started",
         });
+
+        if (resp != null) {
+          dynamic parsed = resp is String ? json.decode(resp) : resp;
+          if (parsed is Map && parsed["status"] == "invalid") {
+            if (mounted) {
+              UtilClass.showAlertDialog(
+                context: context,
+                message: parsed["message"] ?? "Cannot start order yet.",
+              );
+            }
+            return;
+          }
+        }
       } catch (_) {}
+
+      if (orderId != null) Preferences.addStartedOrderId(orderId.toString().trim());
+      if (ordId.isNotEmpty) Preferences.addStartedOrderId(ordId);
+      if (calId.isNotEmpty) Preferences.addStartedOrderId(calId);
+      if (txnId.isNotEmpty) Preferences.addStartedOrderId(txnId);
 
       if (mounted) {
         setState(() {}); // refresh button to 'Continue'

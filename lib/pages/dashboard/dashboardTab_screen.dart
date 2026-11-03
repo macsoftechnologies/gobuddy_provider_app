@@ -1211,6 +1211,17 @@ Future<void> _getMyOrderAlert() async {
                           _stopRingtone();
                           _isAlertShowing = false;
                           Navigator.pop(context);
+
+                          final targetId = calId.isNotEmpty ? calId : ordId;
+                          if (targetId.isNotEmpty) {
+                            Repository.postApiService(EndPoints.cancelOrders, {
+                              "job_calender_id": targetId,
+                              "cancel_reason": "Declined by provider from live alert",
+                            }).catchError((e) {
+                              debugPrint("Error declining order: $e");
+                              return null;
+                            });
+                          }
                         },
                         child: const Text(
                           "Decline",
@@ -1599,6 +1610,16 @@ Future<void> _getMyOrderAlert() async {
     }
   }
 
+  Future<void> _onRefreshDashboard() async {
+    getAllServices();
+    await Future.wait([
+      _getMyProfileDetails(),
+      _getMyEarningsIncome(),
+      _getDashboardSubscriptions(),
+      _getProviderRating(),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -1613,8 +1634,11 @@ Future<void> _getMyOrderAlert() async {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
+        child: RefreshIndicator(
+          onRefresh: _onRefreshDashboard,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Column(
             children: [
               // Header Container with Gradient and Profile Info
               Container(
@@ -2002,6 +2026,7 @@ Future<void> _getMyOrderAlert() async {
               _buildPaginationDots(),
               SizedBox(height: screenHeight * 0.015),
             ],
+          ),
           ),
         ),
       ),
